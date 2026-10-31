@@ -4,22 +4,40 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from database import engine, Base
-import models # ensure all models are registered
-import cognee_memory # ensure cognee memory model is registered
+from database import engine, SessionLocal, Base
+import models
+import cognee_memory
 from routes.auth_routes import router as auth_router
 from routes.admin_routes import router as admin_router
 from routes.payment_routes import router as payment_router
 from routes.rules_routes import router as rules_router
 from routes.explain_routes import router as explain_router
 from events import event_manager
+from auth import hash_password
 
-# Create database tables automatically (skip on serverless cold-start)
-if not os.getenv("VERCEL") and engine is not None:
-    try:
-        Base.metadata.create_all(bind=engine)
-    except Exception as e:
-        print(f"[Database Warning] Table creation skipped or existing: {e}")
+# Initialize tables and seed permanent admin
+try:
+    Base.metadata.create_all(bind=engine)
+    with SessionLocal() as db:
+        admin = db.query(models.User).filter(models.User.role == "admin").first()
+        if not admin:
+            admin_user = models.User(
+                email="admin@gmail.com",
+                hashed_password=hash_password("12345678"),
+                role="admin",
+                full_name="MDR System Admin"
+            )
+            db.add(admin_user)
+            db.flush()
+            admin_profile = models.AdminProfile(
+                user_id=admin_user.id,
+                department="Regulatory Compliance"
+            )
+            db.add(admin_profile)
+            db.commit()
+            print("[Database] Permanent admin account ready: admin@gmail.com")
+except Exception as e:
+    print(f"[Database Warning] Table creation / seeding: {e}")
 
 app = FastAPI(
     title="MDR Settlement Guardian API",
@@ -83,7 +101,8 @@ def health_check():
         "status": "healthy",
         "service": "MDR Settlement Guardian API",
         "version": "1.0.0",
-        "stage": "Stage 3 - LLM Explainer, Cognee Memory & Sarvam Voice"
+        "stage": "Stage 3 - LLM Explainer, Cognee Memory & Sarvam Voice",
+        "database": str(engine.url)
     }
 
 if __name__ == "__main__":
