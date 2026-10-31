@@ -10,8 +10,15 @@ load_dotenv(os.path.join(BASE_DIR, ".env"))
 
 DATABASE_URL = os.getenv(
     "DATABASE_URL",
-    "postgresql+psycopg://postgres.jgbsnhnyxykgqttomrol:%40Paytm246%21%40@aws-0-eu-west-1.pooler.supabase.com:5432/postgres"
+    "postgresql+psycopg://postgres.jgbsnhnyxykgqttomrol:%40Paytm246%21%40@aws-0-eu-west-1.pooler.supabase.com:6543/postgres"
 )
+
+# Auto-heal missing '@' delimiter between password and pooler host if mistyped in Vercel
+if "supabase.com" in DATABASE_URL:
+    if "@aws" not in DATABASE_URL:
+        DATABASE_URL = DATABASE_URL.replace("%40aws", "%40@aws")
+        DATABASE_URL = DATABASE_URL.replace("%21%40aws", "%21%40@aws")
+        DATABASE_URL = DATABASE_URL.replace("%40Paytm246%21%40aws", "%40Paytm246%21%40@aws")
 
 # On serverless (Vercel), only /tmp is writable
 if os.getenv("VERCEL"):
@@ -34,11 +41,11 @@ def create_db_engine():
     
     # Supabase session pooler on 5432 and transaction pooler on 6543
     if "pooler.supabase.com" in DATABASE_URL:
-        # Try port 6543 (transaction pooler) first for serverless
+        # Port 6543 (transaction pooler) works best for serverless
         if ":5432" in DATABASE_URL:
             urls_to_try.append(DATABASE_URL.replace(":5432", ":6543"))
         urls_to_try.append(DATABASE_URL)
-        # Try psycopg2
+        # Try psycopg2 driver alternatives
         urls_to_try.append(DATABASE_URL.replace("postgresql+psycopg://", "postgresql+psycopg2://").replace(":5432", ":6543"))
         urls_to_try.append(DATABASE_URL.replace("postgresql+psycopg://", "postgresql+psycopg2://"))
     else:
@@ -50,13 +57,13 @@ def create_db_engine():
             if is_serverless:
                 eng = create_engine(
                     url,
-                    connect_args={"connect_timeout": 10},
+                    connect_args={"connect_timeout": 12},
                     poolclass=NullPool
                 )
             else:
                 eng = create_engine(
                     url,
-                    connect_args={"connect_timeout": 10},
+                    connect_args={"connect_timeout": 12},
                     pool_pre_ping=True,
                     pool_recycle=300,
                     pool_size=10,
