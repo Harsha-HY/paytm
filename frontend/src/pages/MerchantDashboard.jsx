@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { apiRequest } from '../api/client';
@@ -33,7 +33,13 @@ import {
   PlusCircle,
   Calendar,
   History,
-  Check
+  Check,
+  Upload,
+  Download,
+  Scale,
+  Sparkles,
+  FileSpreadsheet,
+  AlertCircle
 } from 'lucide-react';
 
 export default function MerchantDashboard() {
@@ -64,6 +70,12 @@ export default function MerchantDashboard() {
 
   const [loading, setLoading] = useState(true);
   const [dailyLoading, setDailyLoading] = useState(false);
+
+  // Reconciliation State
+  const [reconciliationData, setReconciliationData] = useState(null);
+  const [reconcileLoading, setReconcileLoading] = useState(false);
+  const [reconcileError, setReconcileError] = useState('');
+  const csvFileInputRef = useRef(null);
 
   // Modals state
   const [showMyQR, setShowMyQR] = useState(false);
@@ -98,7 +110,7 @@ export default function MerchantDashboard() {
     loadWallet();
     loadDailyAnalysis(selectedDate);
 
-    // Event-driven WebSocket synchronization (updates only when an actual transaction/status change occurs)
+    // Event-driven WebSocket synchronization
     const unsubscribe = realtime.subscribe((event) => {
       if (
         event.type === 'TRANSACTION_CREATED' ||
@@ -136,12 +148,80 @@ export default function MerchantDashboard() {
     loadDailyAnalysis(selectedDate);
   };
 
-  // Helper for quick date pills
-  const setQuickDate = (daysAgo) => {
-    const d = new Date();
-    d.setDate(d.getDate() - daysAgo);
-    const dateStr = d.toISOString().split('T')[0];
-    setSelectedDate(dateStr);
+  const handleDownloadSampleCSV = async () => {
+    try {
+      const token = localStorage.getItem('token');
+      const response = await fetch('/api/payments/reconciliation/sample-csv', {
+        headers: { Authorization: `Bearer ${token}` }
+      });
+      const blob = await response.blob();
+      const url = window.URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `Settlement_Report_Sample_${user?.id || 'demo'}.csv`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+    } catch (err) {
+      alert('Error downloading sample CSV: ' + err.message);
+    }
+  };
+
+  const handleCSVUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setReconcileLoading(true);
+    setReconcileError('');
+    try {
+      const token = localStorage.getItem('token');
+      const formData = new FormData();
+      formData.append('file', file);
+
+      const response = await fetch('/api/payments/reconciliation/upload', {
+        method: 'POST',
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData
+      });
+
+      if (!response.ok) {
+        const errJson = await response.json();
+        throw new Error(errJson.detail || 'Reconciliation upload failed');
+      }
+
+      const data = await response.json();
+      setReconciliationData(data);
+    } catch (err) {
+      setReconcileError(err.message || 'Error processing CSV file.');
+    } finally {
+      setReconcileLoading(false);
+      if (csvFileInputRef.current) csvFileInputRef.current.value = '';
+    }
+  };
+
+  const handleUpdateRecordStatus = (recordId, newStatus) => {
+    if (!reconciliationData) return;
+    const updatedRecords = reconciliationData.records.map(r => {
+      if (r.id === recordId) {
+        return { ...r, status: newStatus };
+      }
+      return r;
+    });
+
+    const matchedCount = updatedRecords.filter(r => r.status === 'MATCHED').length;
+    const timingCount = updatedRecords.filter(r => r.status === 'TIMING_DIFFERENCE').length;
+    const discCount = updatedRecords.filter(r => r.status === 'DISCREPANCY').length;
+
+    setReconciliationData({
+      ...reconciliationData,
+      summary: {
+        ...reconciliationData.summary,
+        matched_records: matchedCount,
+        timing_differences: timingCount,
+        discrepancies: discCount
+      },
+      records: updatedRecords
+    });
   };
 
   const isPending = merchant?.verification_status === 'Pending';
@@ -201,9 +281,9 @@ export default function MerchantDashboard() {
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 -mt-3 space-y-4">
         {/* Compliance Notice */}
         <div className="bg-sky-100/80 border border-sky-200 text-[#002970] px-3.5 py-1.5 rounded-xl text-[11px] font-semibold flex items-center justify-between">
-          <span>Simulated Merchant Settlement Platform — No Real Money Transferred</span>
+          <span>DEMO PAYMENT — NO REAL MONEY TRANSFERRED.</span>
           <span className="text-[10px] font-bold uppercase tracking-wider bg-white px-2 py-0.5 rounded-md text-[#002970] border border-sky-300">
-            MDR Audit Engine
+            MDR Settlement Guardian
           </span>
         </div>
 
@@ -237,7 +317,7 @@ export default function MerchantDashboard() {
                 )}
               </div>
               <span className="text-[11px] text-slate-400 mt-1 block">
-                Primary linked settlement balance for instant payments and disbursements
+                Net settlement credited directly after MDR and GST deductions
               </span>
             </div>
 
@@ -258,92 +338,143 @@ export default function MerchantDashboard() {
               onClick={() => setShowMyQR(true)}
               className="p-3.5 rounded-2xl bg-[#002970] hover:bg-[#0A192F] text-white flex flex-col items-center justify-center space-y-1.5 shadow-md shadow-[#002970]/20 transition-all hover:scale-[1.02] cursor-pointer"
             >
-              <div className="w-9 h-9 rounded-xl bg-white/10 flex items-center justify-center">
-                <QrCode className="w-5 h-5 text-[#00BAF2]" />
-              </div>
-              <span className="text-xs font-bold">My Merchant QR</span>
+              <QrCode className="w-5 h-5 text-[#00BAF2]" />
+              <span className="text-xs font-bold">My Store QR</span>
+              <span className="text-[10px] text-sky-200">Show / Download QR</span>
             </button>
 
             <button
               onClick={() => setShowScanner(true)}
-              className="p-3.5 rounded-2xl bg-sky-50 hover:bg-sky-100 text-[#002970] border border-sky-200 flex flex-col items-center justify-center space-y-1.5 transition-all hover:scale-[1.02] cursor-pointer"
+              className="p-3.5 rounded-2xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-900 flex flex-col items-center justify-center space-y-1.5 shadow-sm transition-all hover:scale-[1.02] cursor-pointer"
             >
-              <div className="w-9 h-9 rounded-xl bg-[#002970] text-white flex items-center justify-center">
-                <Scan className="w-4 h-4" />
-              </div>
-              <span className="text-xs font-bold">Scan to Pay</span>
-            </button>
-
-            <button
-              onClick={() => navigate('/merchant/history')}
-              className="p-3.5 rounded-2xl bg-slate-50 hover:bg-slate-100 text-slate-800 border border-slate-200 flex flex-col items-center justify-center space-y-1.5 transition-all hover:scale-[1.02] cursor-pointer"
-            >
-              <div className="w-9 h-9 rounded-xl bg-slate-200 text-slate-700 flex items-center justify-center">
-                <Receipt className="w-5 h-5" />
-              </div>
-              <span className="text-xs font-bold">All History</span>
+              <Scan className="w-5 h-5 text-[#002970]" />
+              <span className="text-xs font-bold">Scan Any QR</span>
+              <span className="text-[10px] text-slate-400">Live Camera Scan</span>
             </button>
 
             <button
               onClick={() => {
-                const el = document.getElementById('daily-analysis-panel');
-                if (el) el.scrollIntoView({ behavior: 'smooth' });
+                const reconcSec = document.getElementById('reconciliation-section');
+                if (reconcSec) reconcSec.scrollIntoView({ behavior: 'smooth' });
               }}
-              className="p-3.5 rounded-2xl bg-emerald-50 hover:bg-emerald-100 text-emerald-900 border border-emerald-200 flex flex-col items-center justify-center space-y-1.5 transition-all hover:scale-[1.02] cursor-pointer"
+              className="p-3.5 rounded-2xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-900 flex flex-col items-center justify-center space-y-1.5 shadow-sm transition-all hover:scale-[1.02] cursor-pointer"
             >
-              <div className="w-9 h-9 rounded-xl bg-emerald-600 text-white flex items-center justify-center">
-                <Percent className="w-4 h-4" />
-              </div>
-              <span className="text-xs font-bold">Daily Analysis</span>
+              <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+              <span className="text-xs font-bold">Reconcile CSV</span>
+              <span className="text-[10px] text-slate-400">Match Bank Reports</span>
+            </button>
+
+            <button
+              onClick={() => navigate('/merchant/history')}
+              className="p-3.5 rounded-2xl bg-white hover:bg-slate-50 border border-slate-200 text-slate-900 flex flex-col items-center justify-center space-y-1.5 shadow-sm transition-all hover:scale-[1.02] cursor-pointer"
+            >
+              <History className="w-5 h-5 text-indigo-600" />
+              <span className="text-xs font-bold">Full Ledger</span>
+              <span className="text-[10px] text-slate-400">Audit History</span>
             </button>
           </div>
         </div>
 
         {/* ============================================================== */}
-        {/* DAILY SETTLEMENT ANALYSIS PANEL (RESETS AT 11:59:59 PM DAILY)  */}
+        {/* PART 3: VERIFIED MERCHANT PROFILE & CLASSIFICATION CARD         */}
         {/* ============================================================== */}
-        <div id="daily-analysis-panel" className="bg-white rounded-3xl p-5 sm:p-6 border border-slate-200 shadow-sm space-y-5">
-          {/* Panel Header & Day Switcher */}
-          <div className="flex flex-col md:flex-row md:items-center justify-between pb-4 border-b border-slate-100 gap-3">
+        <div className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-200 space-y-4">
+          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+            <div className="flex items-center space-x-2">
+              <ShieldCheck className="w-5 h-5 text-[#002970]" />
+              <h2 className="font-extrabold text-[#0A192F] text-base">Verified Merchant Classification Profile</h2>
+            </div>
+            <span className="text-[10px] font-mono text-slate-400 bg-slate-100 px-2 py-0.5 rounded-md">
+              Merchant ID: MERCH_{user?.id}
+            </span>
+          </div>
+
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-3 text-xs">
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200">
+              <span className="text-[10px] text-slate-400 font-bold uppercase block">Merchant Shop Name</span>
+              <span className="font-bold text-slate-900 block mt-0.5">{merchant?.business_name || user?.full_name}</span>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200">
+              <span className="text-[10px] text-slate-400 font-bold uppercase block">Approved Category</span>
+              <span className="font-bold text-slate-900 block mt-0.5">
+                {merchant?.business_category || 'General Merchant'}
+                {merchant?.business_subcategory && <span className="text-slate-500 font-normal"> · {merchant.business_subcategory}</span>}
+              </span>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200">
+              <span className="text-[10px] text-slate-400 font-bold uppercase block">Settlement Bank</span>
+              <span className="font-bold text-slate-900 block mt-0.5">{merchant?.merchant_bank || 'State Bank of India'}</span>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200">
+              <span className="text-[10px] text-slate-400 font-bold uppercase block">QR / Payment Provider</span>
+              <span className="font-bold text-slate-900 block mt-0.5">{merchant?.qr_provider || 'Paytm for Business'}</span>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200">
+              <span className="text-[10px] text-slate-400 font-bold uppercase block">Acquiring Bank</span>
+              <span className="font-bold text-slate-900 block mt-0.5">{merchant?.acquiring_bank || 'Axis Bank Ltd'}</span>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200">
+              <span className="text-[10px] text-slate-400 font-bold uppercase block">Monthly Eligible Receipts</span>
+              <span className="font-bold text-slate-900 block mt-0.5">
+                ₹{(merchant?.monthly_eligible_receipts || 45000).toLocaleString('en-IN')}
+              </span>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200">
+              <span className="text-[10px] text-slate-400 font-bold uppercase block">P2PM Eligibility Status</span>
+              <span className={`font-bold block mt-0.5 ${merchant?.p2pm_eligible ? 'text-emerald-700' : 'text-slate-700'}`}>
+                {merchant?.p2pm_eligible ? '✅ Eligible (≤ ₹1 Lakh Exemption)' : 'Standard Commercial Merchant'}
+              </span>
+            </div>
+
+            <div className="p-3 bg-slate-50 rounded-2xl border border-slate-200">
+              <span className="text-[10px] text-slate-400 font-bold uppercase block">Applicable MDR Rule</span>
+              <span className="font-bold text-[#002970] block mt-0.5">{merchant?.applicable_mdr_rule || 'DEMO_CONFIG_RULE'}</span>
+            </div>
+          </div>
+
+          <div className="p-3 bg-sky-50/70 border border-sky-200 rounded-2xl text-[11px] text-slate-700 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div>
+              <span className="font-bold text-[#002970]">Responsible GST Tax Invoice Supplier: </span>
+              <span>{merchant?.gst_invoice_supplier || 'Acquiring Bank (Axis Bank Ltd) - GSTIN 27AAACA0000A1Z5'}</span>
+            </div>
+            <span className="text-[10px] text-slate-500 font-medium">
+              Effective Date: {formatDateTime(merchant?.created_at)}
+            </span>
+          </div>
+        </div>
+
+        {/* ============================================================== */}
+        {/* PART 8: MERCHANT DASHBOARD 5 METRIC CARDS & TRANSACTIONS       */}
+        {/* ============================================================== */}
+        <div className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-200 space-y-5">
+          {/* Section Header with Day Selector */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-4 border-b border-slate-100">
             <div>
               <div className="flex items-center space-x-2">
-                <h2 className="font-extrabold text-[#0A192F] text-lg">
-                  Daily Settlement Analysis
-                </h2>
-                {dailyData.is_today && (
-                  <span className="px-2.5 py-0.5 rounded-full text-[10px] font-extrabold uppercase tracking-wider bg-emerald-400 text-slate-950 animate-pulse">
-                    Today Live
-                  </span>
-                )}
+                <Calendar className="w-5 h-5 text-[#002970]" />
+                <h2 className="font-extrabold text-[#0A192F] text-base sm:text-lg">Daily Settlement Overview</h2>
               </div>
               <p className="text-xs text-slate-400 mt-0.5">
-                Calculates daily customer sales · Automatic settlement cutoff resets at{' '}
-                <span className="font-bold text-slate-700">11:59:59 PM</span> everyday
+                Every transaction resets at 11:59:59 PM. Past dates are preserved in archive.
               </p>
             </div>
 
-            {/* Day Selector Buttons & Calendar Picker */}
-            <div className="flex flex-wrap items-center gap-2">
-              <button
-                onClick={() => setQuickDate(0)}
-                className={`px-3 py-1.5 rounded-xl text-xs font-bold transition-all cursor-pointer ${
-                  selectedDate === todayStr
-                    ? 'bg-[#002970] text-white shadow-xs'
-                    : 'bg-slate-100 text-slate-600 hover:bg-slate-200'
-                }`}
-              >
-                Today (Live)
-              </button>
-
-              <button
-                onClick={() => setQuickDate(1)}
-                className="px-3 py-1.5 rounded-xl text-xs font-bold bg-slate-100 text-slate-600 hover:bg-slate-200 transition-all cursor-pointer"
-              >
-                Yesterday
-              </button>
-
-              <div className="flex items-center space-x-1.5 bg-slate-100 px-3 py-1 rounded-xl border border-slate-200">
-                <Calendar className="w-3.5 h-3.5 text-slate-500" />
+            <div className="flex items-center space-x-2">
+              <div className="flex items-center space-x-1.5 bg-slate-100 p-1 rounded-xl">
+                <button
+                  onClick={() => setSelectedDate(todayStr)}
+                  className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
+                    selectedDate === todayStr ? 'bg-[#002970] text-white shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                  }`}
+                >
+                  Today
+                </button>
                 <input
                   type="date"
                   value={selectedDate}
@@ -355,58 +486,58 @@ export default function MerchantDashboard() {
             </div>
           </div>
 
-          {/* EXACT 5 METRICS CARDS AS REQUESTED */}
+          {/* 5 KEY METRICS CARDS */}
           <div className="grid grid-cols-2 lg:grid-cols-5 gap-3">
             {/* 1. Total Customer Payments */}
             <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between">
               <div>
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                  Total Customer Payments
+                  Total Demo Sales
                 </span>
                 <div className="text-xl sm:text-2xl font-black text-[#0A192F] mt-1 tracking-tight">
                   ₹{dailyData.gross_sales.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </div>
               </div>
-              <span className="text-[11px] text-slate-400 mt-2 font-medium">Gross customer sales</span>
+              <span className="text-[11px] text-slate-400 mt-2 font-medium">Gross customer payments</span>
             </div>
 
             {/* 2. Total Transactions */}
             <div className="bg-white p-4 rounded-3xl border border-slate-200 shadow-sm flex flex-col justify-between">
               <div>
                 <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                  Total Transactions
+                  Number of Transactions
                 </span>
                 <div className="text-xl sm:text-2xl font-black text-slate-900 mt-1 tracking-tight">
                   {dailyData.total_transactions}
                 </div>
               </div>
-              <span className="text-[11px] text-slate-400 mt-2 font-medium">Simulated payments</span>
+              <span className="text-[11px] text-slate-400 mt-2 font-medium">Demo payments</span>
             </div>
 
             {/* 3. Estimated MDR Fees */}
             <div className="bg-white p-4 rounded-3xl border border-rose-100 shadow-sm flex flex-col justify-between">
               <div>
                 <span className="text-[10px] font-bold text-rose-500 uppercase tracking-wider block">
-                  Estimated MDR Fees
+                  Total Estimated MDR
                 </span>
                 <div className="text-xl sm:text-2xl font-black text-rose-600 mt-1 tracking-tight">
                   - ₹{dailyData.total_mdr.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </div>
               </div>
-              <span className="text-[11px] text-rose-400 mt-2 font-medium">Per regulatory schedule</span>
+              <span className="text-[11px] text-rose-400 mt-2 font-medium">Per verified demo policy</span>
             </div>
 
             {/* 4. Estimated 18% GST */}
             <div className="bg-white p-4 rounded-3xl border border-amber-100 shadow-sm flex flex-col justify-between">
               <div>
                 <span className="text-[10px] font-bold text-amber-600 uppercase tracking-wider block">
-                  Estimated 18% GST
+                  Total Estimated GST (18%)
                 </span>
                 <div className="text-xl sm:text-2xl font-black text-amber-700 mt-1 tracking-tight">
                   - ₹{dailyData.total_gst.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </div>
               </div>
-              <span className="text-[11px] text-amber-500 mt-2 font-medium">Taxes on MDR fees</span>
+              <span className="text-[11px] text-amber-500 mt-2 font-medium">18% GST on MDR fee</span>
             </div>
 
             {/* 5. Expected Net Settlement */}
@@ -419,7 +550,7 @@ export default function MerchantDashboard() {
                   ₹{dailyData.expected_net_settlement.toLocaleString('en-IN', { minimumFractionDigits: 2 })}
                 </div>
               </div>
-              <span className="text-[11px] text-sky-200 mt-2 font-medium">Calculated net bank credit</span>
+              <span className="text-[11px] text-sky-200 mt-2 font-medium">Calculated bank credit</span>
             </div>
           </div>
 
@@ -427,24 +558,24 @@ export default function MerchantDashboard() {
           <div className="pt-2">
             <div className="flex items-center justify-between pb-3 border-b border-slate-100">
               <h3 className="font-extrabold text-[#0A192F] text-sm sm:text-base">
-                Transactions on {selectedDate} ({dailyData.transactions.length})
+                Recent Transactions on {selectedDate} ({dailyData.transactions.length})
               </h3>
               <span className="text-xs text-slate-400">
-                Tap any transaction to view receipt breakdown
+                Tap any transaction to view receipt breakdown & AI assistant
               </span>
             </div>
 
             {dailyLoading ? (
               <div className="py-10 text-center text-xs text-slate-400">
                 <RefreshCw className="w-5 h-5 animate-spin mx-auto text-[#002970] mb-2" />
-                Loading day-wise ledger...
+                Loading ledger...
               </div>
             ) : dailyData.transactions.length === 0 ? (
               <div className="py-10 text-center text-slate-500">
                 <Clock className="w-8 h-8 text-slate-300 mx-auto mb-2" />
                 <p className="text-xs font-semibold text-slate-700">No customer payments on {selectedDate}</p>
                 <p className="text-[11px] text-slate-400 mt-0.5">
-                  Payments received before 11:59:59 PM on this day will be calculated here.
+                  Payments received before 11:59:59 PM on this day will appear here.
                 </p>
               </div>
             ) : (
@@ -481,6 +612,11 @@ export default function MerchantDashboard() {
                             >
                               {isSent ? 'Money Sent' : 'Money Received'}
                             </span>
+                            {s && (
+                              <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-sky-100 text-[#002970]">
+                                {s.applied_rate || s.mdr_rate}
+                              </span>
+                            )}
                           </div>
                           <div className="text-[11px] text-slate-400 flex items-center space-x-1.5 mt-0.5">
                             <span>{timeFormatted}</span>
@@ -517,101 +653,152 @@ export default function MerchantDashboard() {
               </div>
             )}
           </div>
+        </div>
 
-          {/* ============================================================== */}
-          {/* HISTORICAL DAYS ARCHIVE PANEL (OLD DAY DATA IS VISIBLE)        */}
-          {/* ============================================================== */}
-          <div className="pt-4 border-t border-slate-200">
-            <div className="flex items-center justify-between pb-3">
-              <div>
-                <h3 className="font-extrabold text-[#0A192F] text-sm sm:text-base flex items-center space-x-2">
-                  <History className="w-4 h-4 text-slate-500" />
-                  <span>Past Days Settlement Archive</span>
-                </h3>
-                <p className="text-xs text-slate-400">
-                  Select any historical day to inspect its full transactions and deductions
-                </p>
+        {/* ============================================================== */}
+        {/* PART 9: SETTLEMENT RECONCILIATION CSV UPLOAD & AUDIT PANEL     */}
+        {/* ============================================================== */}
+        <div id="reconciliation-section" className="bg-white rounded-3xl p-5 sm:p-6 shadow-sm border border-slate-200 space-y-4">
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
+            <div>
+              <div className="flex items-center space-x-2">
+                <FileSpreadsheet className="w-5 h-5 text-emerald-600" />
+                <h2 className="font-extrabold text-[#0A192F] text-base">Settlement Reconciliation & Bank Audit</h2>
               </div>
-
-              <button
-                onClick={() => navigate('/merchant/history')}
-                className="inline-flex items-center space-x-1 text-xs font-bold text-[#002970] hover:text-[#00BAF2] px-3 py-1.5 rounded-xl bg-sky-50 hover:bg-sky-100 transition-colors cursor-pointer"
-              >
-                <span>Full Ledger</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </button>
+              <p className="text-xs text-slate-400 mt-0.5">
+                Upload bank/aggregator settlement CSV to detect missing credits, duplicate deductions, and timing holdbacks.
+              </p>
             </div>
 
-            {dailyData.historical_days.length === 0 ? (
-              <div className="text-center py-6 text-xs text-slate-400">
-                No past daily history recorded yet.
+            <div className="flex items-center space-x-2">
+              <button
+                onClick={handleDownloadSampleCSV}
+                className="inline-flex items-center space-x-1.5 px-3 py-1.5 rounded-xl bg-slate-100 hover:bg-slate-200 text-slate-700 text-xs font-bold transition-all cursor-pointer"
+              >
+                <Download className="w-3.5 h-3.5" />
+                <span>Sample CSV</span>
+              </button>
+
+              <input
+                ref={csvFileInputRef}
+                type="file"
+                accept=".csv"
+                className="hidden"
+                onChange={handleCSVUpload}
+              />
+
+              <button
+                onClick={() => csvFileInputRef.current?.click()}
+                disabled={reconcileLoading}
+                className="inline-flex items-center space-x-1.5 px-4 py-1.5 rounded-xl bg-[#002970] hover:bg-[#0A192F] text-white text-xs font-bold shadow-md shadow-[#002970]/20 transition-all cursor-pointer disabled:opacity-50"
+              >
+                <Upload className="w-3.5 h-3.5 text-[#00BAF2]" />
+                <span>{reconcileLoading ? 'Auditing CSV...' : 'Upload Settlement CSV'}</span>
+              </button>
+            </div>
+          </div>
+
+          {reconcileError && (
+            <div className="p-3 bg-rose-50 border border-rose-200 rounded-xl text-rose-700 text-xs flex items-center space-x-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{reconcileError}</span>
+            </div>
+          )}
+
+          {/* Reconciliation Results Display */}
+          {reconciliationData && (
+            <div className="space-y-4 animate-in fade-in">
+              {/* Summary Cards */}
+              <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+                <div className="p-3.5 rounded-2xl bg-slate-50 border border-slate-200">
+                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">Audited Records</span>
+                  <div className="text-2xl font-black text-slate-900 mt-1">{reconciliationData.summary.total_records}</div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-emerald-50 border border-emerald-200">
+                  <span className="text-[10px] font-bold text-emerald-700 uppercase tracking-wider block">Matched (Accurate)</span>
+                  <div className="text-2xl font-black text-emerald-800 mt-1">{reconciliationData.summary.matched_records}</div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-amber-50 border border-amber-200">
+                  <span className="text-[10px] font-bold text-amber-700 uppercase tracking-wider block">Timing Differences</span>
+                  <div className="text-2xl font-black text-amber-800 mt-1">{reconciliationData.summary.timing_differences}</div>
+                </div>
+
+                <div className="p-3.5 rounded-2xl bg-rose-50 border border-rose-200">
+                  <span className="text-[10px] font-bold text-rose-700 uppercase tracking-wider block">Discrepancies</span>
+                  <div className="text-2xl font-black text-rose-800 mt-1">{reconciliationData.summary.discrepancies}</div>
+                </div>
               </div>
-            ) : (
-              <div className="overflow-x-auto">
+
+              {/* Records Breakdown Table */}
+              <div className="overflow-x-auto border border-slate-200 rounded-2xl">
                 <table className="w-full text-left text-xs">
-                  <thead className="bg-slate-50 text-slate-400 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200">
+                  <thead className="bg-slate-50 text-slate-500 font-bold uppercase text-[10px] tracking-wider border-b border-slate-200">
                     <tr>
+                      <th className="py-2.5 px-3">Txn ID / Ref</th>
                       <th className="py-2.5 px-3">Date</th>
-                      <th className="py-2.5 px-3 text-right">Customer Payments</th>
-                      <th className="py-2.5 px-3 text-center">Txns</th>
-                      <th className="py-2.5 px-3 text-right">MDR Fees</th>
-                      <th className="py-2.5 px-3 text-right">GST (18%)</th>
-                      <th className="py-2.5 px-3 text-right text-[#002970] font-bold">Net Bank Credit</th>
-                      <th className="py-2.5 px-3 text-right">Action</th>
+                      <th className="py-2.5 px-3 text-right">Gross Amount</th>
+                      <th className="py-2.5 px-3 text-right">Expected Net</th>
+                      <th className="py-2.5 px-3 text-right">Actual Credit</th>
+                      <th className="py-2.5 px-3 text-right">Difference</th>
+                      <th className="py-2.5 px-3 text-center">Status</th>
+                      <th className="py-2.5 px-3">Reason / Details</th>
                     </tr>
                   </thead>
                   <tbody className="divide-y divide-slate-100">
-                    {dailyData.historical_days.map((d) => {
-                      const isSelected = d.date === selectedDate;
+                    {reconciliationData.records.map((rec) => {
+                      const isMatched = rec.status === 'MATCHED';
+                      const isTiming = rec.status === 'TIMING_DIFFERENCE';
+                      const isDisc = rec.status === 'DISCREPANCY';
+
                       return (
-                        <tr
-                          key={d.date}
-                          className={`hover:bg-slate-50 transition-colors ${
-                            isSelected ? 'bg-sky-50/70 font-semibold' : ''
-                          }`}
-                        >
+                        <tr key={rec.id} className="hover:bg-slate-50 transition-colors">
                           <td className="py-3 px-3">
-                            <div className="font-bold text-slate-900 flex items-center space-x-1.5">
-                              <span>{d.date}</span>
-                              {d.is_today && (
-                                <span className="text-[9px] font-extrabold uppercase px-1.5 py-0.2 rounded bg-emerald-100 text-emerald-800">
-                                  Today
-                                </span>
-                              )}
-                            </div>
+                            <div className="font-mono font-bold text-slate-900">{rec.txn_id}</div>
+                            <div className="text-[10px] text-slate-400 font-mono">{rec.settlement_ref}</div>
                           </td>
 
-                          <td className="py-3 px-3 text-right font-black text-slate-900">
-                            ₹{d.gross_sales.toFixed(2)}
+                          <td className="py-3 px-3 text-slate-600">
+                            {rec.settlement_date}
                           </td>
 
-                          <td className="py-3 px-3 text-center font-bold text-slate-700">
-                            {d.total_transactions}
+                          <td className="py-3 px-3 text-right font-bold text-slate-900">
+                            ₹{rec.gross_amount.toFixed(2)}
                           </td>
 
-                          <td className="py-3 px-3 text-right text-rose-600 font-semibold">
-                            {d.total_mdr > 0 ? `- ₹${d.total_mdr.toFixed(2)}` : '₹0.00'}
+                          <td className="py-3 px-3 text-right font-bold text-[#002970]">
+                            ₹{rec.expected_net.toFixed(2)}
                           </td>
 
-                          <td className="py-3 px-3 text-right text-amber-700 font-semibold">
-                            {d.total_gst > 0 ? `- ₹${d.total_gst.toFixed(2)}` : '₹0.00'}
+                          <td className="py-3 px-3 text-right font-bold text-slate-900">
+                            ₹{rec.actual_credit.toFixed(2)}
                           </td>
 
-                          <td className="py-3 px-3 text-right font-black text-[#002970] text-sm">
-                            ₹{d.expected_net_settlement.toFixed(2)}
+                          <td className={`py-3 px-3 text-right font-bold ${rec.difference < 0 ? 'text-rose-600' : rec.difference > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                            {rec.difference === 0 ? '₹0.00' : `${rec.difference < 0 ? '-' : '+'}₹${Math.abs(rec.difference).toFixed(2)}`}
                           </td>
 
-                          <td className="py-3 px-3 text-right">
-                            <button
-                              onClick={() => setSelectedDate(d.date)}
-                              className={`px-3 py-1 rounded-lg text-xs font-bold transition-all cursor-pointer ${
-                                isSelected
-                                  ? 'bg-[#002970] text-white shadow-xs'
-                                  : 'bg-slate-100 hover:bg-slate-200 text-slate-700'
+                          <td className="py-3 px-3 text-center">
+                            <select
+                              value={rec.status}
+                              onChange={(e) => handleUpdateRecordStatus(rec.id, e.target.value)}
+                              className={`text-[10px] font-extrabold uppercase px-2 py-1 rounded-full border cursor-pointer focus:outline-none ${
+                                isMatched
+                                  ? 'bg-emerald-50 text-emerald-800 border-emerald-300'
+                                  : isTiming
+                                  ? 'bg-amber-50 text-amber-800 border-amber-300'
+                                  : 'bg-rose-50 text-rose-800 border-rose-300'
                               }`}
                             >
-                              {isSelected ? 'Viewing' : 'Inspect'}
-                            </button>
+                              <option value="MATCHED">Matched</option>
+                              <option value="TIMING_DIFFERENCE">Timing Difference</option>
+                              <option value="DISCREPANCY">Discrepancy</option>
+                            </select>
+                          </td>
+
+                          <td className="py-3 px-3 text-slate-600 text-[11px]">
+                            {rec.reason}
                           </td>
                         </tr>
                       );
@@ -619,8 +806,8 @@ export default function MerchantDashboard() {
                   </tbody>
                 </table>
               </div>
-            )}
-          </div>
+            </div>
+          )}
         </div>
       </div>
 

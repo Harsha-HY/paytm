@@ -104,6 +104,14 @@ class MerchantProfileResponse(BaseModel):
     monthly_volume_band: str
     assigned_qr_id: Optional[str] = None
     qr_status: Optional[str] = "ACTIVE"
+    merchant_bank: Optional[str] = "State Bank of India"
+    qr_provider: Optional[str] = "Paytm for Business"
+    acquiring_bank: Optional[str] = "Axis Bank Ltd"
+    monthly_eligible_receipts: Optional[float] = 45000.0
+    p2pm_eligible: Optional[bool] = False
+    gst_invoice_supplier: Optional[str] = "Acquiring Bank (Axis Bank Ltd) - GSTIN 27AAACA0000A1Z5"
+    applicable_mdr_rule: Optional[str] = "DEMO_CONFIG_RULE"
+    rule_effective_date: Optional[datetime] = None
     created_at: datetime
 
     class Config:
@@ -186,6 +194,13 @@ class UserQRResponse(BaseModel):
     business_name: Optional[str] = None
     business_category: Optional[str] = None
     verification_status: Optional[str] = None
+    merchant_bank: Optional[str] = None
+    qr_provider: Optional[str] = None
+    acquiring_bank: Optional[str] = None
+    gst_invoice_supplier: Optional[str] = None
+    p2pm_eligible: Optional[bool] = False
+    monthly_eligible_receipts: Optional[float] = None
+    applicable_mdr_rule: Optional[str] = None
 
 class ResolveQRRequest(BaseModel):
     qr_code: str
@@ -201,6 +216,13 @@ class ResolvedQRResponse(BaseModel):
     city: Optional[str] = None
     state: Optional[str] = None
     verification_status: Optional[str] = None
+    merchant_bank: Optional[str] = None
+    qr_provider: Optional[str] = None
+    acquiring_bank: Optional[str] = None
+    gst_invoice_supplier: Optional[str] = None
+    p2pm_eligible: Optional[bool] = False
+    monthly_eligible_receipts: Optional[float] = None
+    applicable_mdr_rule: Optional[str] = None
 
 class PaymentSimulationRequest(BaseModel):
     qr_code: str

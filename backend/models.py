@@ -60,6 +60,14 @@ class MerchantProfile(Base):
     monthly_volume_band = Column(String(50), default="Under ₹1 Lakh")
     assigned_qr_id = Column(String(100), nullable=True)
     qr_status = Column(String(30), default="ACTIVE") # 'ACTIVE' | 'INACTIVE' | 'SUSPENDED'
+    merchant_bank = Column(String(100), default="State Bank of India")
+    qr_provider = Column(String(100), default="Paytm for Business")
+    acquiring_bank = Column(String(100), default="Axis Bank Ltd")
+    monthly_eligible_receipts = Column(Float, default=45000.0)
+    p2pm_eligible = Column(Boolean, default=False)
+    gst_invoice_supplier = Column(String(200), default="Acquiring Bank (Axis Bank Ltd) - GSTIN 27AAACA0000A1Z5")
+    applicable_mdr_rule = Column(String(100), default="DEMO_CONFIG_RULE")
+    rule_effective_date = Column(DateTime, default=datetime.utcnow)
     created_at = Column(DateTime, default=datetime.utcnow)
 
     user = relationship("User", back_populates="merchant_profile")

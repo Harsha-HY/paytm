@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import {
   X,
   FileText,
@@ -16,12 +16,32 @@ import {
   ShieldCheck,
   Receipt,
   HelpCircle,
-  AlertTriangle
+  AlertTriangle,
+  Sparkles,
+  Languages,
+  Scale
 } from 'lucide-react';
 import { formatDateTime, formatCurrency } from '../utils/formatters';
+import { apiRequest } from '../api/client';
 
 export default function TransactionReceiptModal({ txn, isOpen, onClose }) {
   const [copied, setCopied] = useState(false);
+  const [activeLang, setActiveLang] = useState('english'); // 'english' | 'hindi' | 'kannada'
+  const [explanationData, setExplanationData] = useState(null);
+  const [disputeLetter, setDisputeLetter] = useState(null);
+  const [showDisputeModal, setShowDisputeModal] = useState(false);
+  const [disputeLoading, setDisputeLoading] = useState(false);
+  const [disputeCopied, setDisputeCopied] = useState(false);
+
+  useEffect(() => {
+    if (isOpen && txn?.txn_id) {
+      setDisputeLetter(null);
+      setShowDisputeModal(false);
+      apiRequest(`/explain/transaction/${txn.txn_id}`)
+        .then(res => setExplanationData(res))
+        .catch(err => console.warn('Could not load AI explanation:', err));
+    }
+  }, [isOpen, txn]);
 
   if (!isOpen || !txn) return null;
 
@@ -36,6 +56,35 @@ export default function TransactionReceiptModal({ txn, isOpen, onClose }) {
     setTimeout(() => setCopied(false), 2000);
   };
 
+  const handleGenerateDispute = async () => {
+    setDisputeLoading(true);
+    try {
+      const res = await apiRequest('/explain/dispute-draft', {
+        method: 'POST',
+        body: JSON.stringify({
+          txn_id: txn.txn_id,
+          actual_deducted_mdr: s ? s.mdr_amount + 10.0 : 10.0,
+          actual_deducted_gst: s ? s.gst_amount + 1.80 : 1.80,
+          language: activeLang
+        })
+      });
+      setDisputeLetter(res);
+      setShowDisputeModal(true);
+    } catch (err) {
+      console.error('Error generating dispute letter:', err);
+    } finally {
+      setDisputeLoading(false);
+    }
+  };
+
+  const handleCopyDispute = () => {
+    if (!disputeLetter) return;
+    const text = disputeLetter[activeLang] || disputeLetter.english;
+    navigator.clipboard.writeText(text);
+    setDisputeCopied(true);
+    setTimeout(() => setDisputeCopied(false), 2000);
+  };
+
   const handleDownloadReceipt = () => {
     const formattedDate = formatDateTime(txn.created_at);
 
@@ -44,7 +93,7 @@ export default function TransactionReceiptModal({ txn, isOpen, onClose }) {
               MDR SETTLEMENT GUARDIAN
         OFFICIAL SIMULATED PAYMENT RECEIPT
 ============================================================
-* SIMULATED PAYMENT — NO REAL MONEY TRANSFERRED *
+* DEMO PAYMENT — NO REAL MONEY TRANSFERRED *
 
 Transaction ID : ${txn.txn_id}
 Date & Time    : ${formattedDate}
@@ -57,7 +106,7 @@ PARTIES INVOLVED:
 ------------------------------------------------------------
 Sender (Customer): ${txn.sender_name} (${txn.sender_account_type || 'Personal'})
 Receiver         : ${txn.receiver_name} (${txn.receiver_account_type || 'Personal'})
-${isP2M && txn.receiver_business_name ? `Merchant Shop    : ${txn.receiver_business_name}\n` : ''}${isP2M && txn.receiver_business_category ? `Business Category: ${txn.receiver_business_category}\n` : ''}${isP2M && txn.receiver_business_subcategory ? `Subcategory      : ${txn.receiver_business_subcategory}\n` : ''}Payment Note     : ${txn.note || 'Simulated Payment'}
+${isP2M && txn.receiver_business_name ? `Merchant Shop    : ${txn.receiver_business_name}\n` : ''}${isP2M && (s?.business_category || txn.receiver_business_category) ? `Approved Category: ${s?.business_category || txn.receiver_business_category}\n` : ''}${isP2M && (s?.business_subcategory || txn.receiver_business_subcategory) ? `Subcategory      : ${s?.business_subcategory || txn.receiver_business_subcategory}\n` : ''}Payment Note     : ${txn.note || 'Simulated Payment'}
 
 ------------------------------------------------------------
 PAYMENT & DEDUCTION BREAKDOWN:
@@ -68,12 +117,12 @@ ${
     ? `MDR Rule ID              : ${s.rule_id || s.mdr_rule} (v${s.rule_version || 1})
 Applied MDR Rate         : ${s.applied_rate || s.mdr_rate}
 MDR Deduction Fee        : - INR ${s.mdr_amount.toFixed(2)}
-GST on MDR (${Math.round((s.gst_rate || 0.18) * 100)}%)         : - INR ${s.gst_amount.toFixed(2)}
+Estimated GST (18%)      : - INR ${s.gst_amount.toFixed(2)}
 Total Deductions         : - INR ${s.total_deductions.toFixed(2)}
 ------------------------------------------------------------
 EXPECTED NET SETTLEMENT  : INR ${s.net_settlement.toFixed(2)}
 ------------------------------------------------------------
-Regulatory Calculation Note:
+Regulatory Calculation Formula & Note:
 ${s.calculation_note || 'Central MDR rules engine verification snapshot.'}`
     : `MDR Fee (P2P Exemption) : INR 0.00 (Zero Fee)
 GST on MDR               : INR 0.00
@@ -82,7 +131,7 @@ Total Deductions         : INR 0.00
 NET AMOUNT TRANSFERRED   : INR ${txn.amount.toFixed(2)}
 ------------------------------------------------------------
 Exemption Note:
-All P2P personal payments carry 0% MDR under 2026 regulations.`
+All P2P personal payments carry 0% MDR under official regulations.`
 }
 
 ============================================================
@@ -224,7 +273,7 @@ Track 1: Merchant Growth AI · Paytm Build for India
             </div>
           </div>
 
-          {/* Business Category and Subcategory (For Merchant Payments) */}
+          {/* Business Category and Subcategory */}
           {isP2M && (txn.receiver_business_category || s?.business_category) && (
             <div className="p-3 rounded-2xl bg-slate-50 border border-slate-200">
               <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
@@ -247,7 +296,7 @@ Track 1: Merchant Growth AI · Paytm Build for India
               <div className="flex items-center justify-between pb-2 border-b border-sky-200">
                 <div>
                   <span className="font-bold text-[#002970] text-xs block">
-                    Central MDR Engine Rule
+                    Applicable MDR Policy Rule
                   </span>
                   <span className="text-[10px] font-mono text-slate-500">
                     {s.rule_id || s.mdr_rule}
@@ -272,17 +321,17 @@ Track 1: Merchant Growth AI · Paytm Build for India
                 </div>
 
                 <div className="flex justify-between text-amber-700">
-                  <span>GST on MDR ({Math.round((s.gst_rate || 0.18) * 100)}%)</span>
+                  <span>Estimated GST on Fee (18%)</span>
                   <span className="font-bold">- {formatCurrency(s.gst_amount)}</span>
                 </div>
 
                 <div className="flex justify-between text-rose-700 font-bold pt-1.5 border-t border-sky-200">
-                  <span>Total Deductions</span>
+                  <span>Total Deductions (MDR + GST)</span>
                   <span>- {formatCurrency(s.total_deductions)}</span>
                 </div>
 
                 <div className="flex justify-between items-center text-[#002970] font-black text-sm pt-2 border-t-2 border-sky-300">
-                  <span>Expected Net Bank Settlement</span>
+                  <span>Expected Net Settlement</span>
                   <span className="text-base text-[#002970]">
                     {formatCurrency(s.net_settlement)}
                   </span>
@@ -292,7 +341,7 @@ Track 1: Merchant Growth AI · Paytm Build for India
               {s.calculation_note && (
                 <div className="mt-3 p-3 bg-white rounded-xl border border-sky-200 text-slate-600 text-[11px] leading-relaxed">
                   <span className="font-bold text-[#002970] block mb-0.5">
-                    Regulatory Settlement Snapshot:
+                    Settlement Calculation Formula:
                   </span>
                   {s.calculation_note}
                 </div>
@@ -314,9 +363,71 @@ Track 1: Merchant Growth AI · Paytm Build for India
             </div>
           )}
 
+          {/* AI Merchant Assistant Multilingual Explanation Section */}
+          <div className="p-4 rounded-2xl bg-slate-50 border border-slate-200 space-y-2.5">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center space-x-2">
+                <Sparkles className="w-4 h-4 text-[#00BAF2]" />
+                <span className="font-bold text-[#002970] text-xs">AI Merchant Assistant</span>
+              </div>
+              <div className="flex space-x-1 bg-slate-200 p-0.5 rounded-lg text-[10px] font-bold">
+                {['english', 'hindi', 'kannada'].map(l => (
+                  <button
+                    key={l}
+                    onClick={() => setActiveLang(l)}
+                    className={`px-2 py-0.5 rounded-md capitalize transition-all ${
+                      activeLang === l ? 'bg-white text-[#002970] shadow-xs' : 'text-slate-600 hover:text-slate-900'
+                    }`}
+                  >
+                    {l === 'english' ? 'English' : l === 'hindi' ? 'हिंदी' : 'ಕನ್ನಡ'}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            <div className="p-3 bg-white rounded-xl border border-slate-200 text-slate-700 text-xs leading-relaxed">
+              {explanationData?.explanations?.[activeLang] || s?.calculation_note || 'Calculating rules explanation...'}
+            </div>
+
+            {/* Dispute Generator Button if MDR was charged */}
+            {s && s.mdr_amount > 0 && (
+              <div className="pt-1">
+                <button
+                  onClick={handleGenerateDispute}
+                  disabled={disputeLoading}
+                  className="w-full py-2 px-3 bg-white hover:bg-slate-100 text-[#002970] border border-[#002970]/30 rounded-xl text-xs font-bold flex items-center justify-center space-x-1.5 transition-all cursor-pointer shadow-xs"
+                >
+                  <Scale className="w-3.5 h-3.5 text-rose-600" />
+                  <span>{disputeLoading ? 'Drafting Letter...' : 'Generate Overcharge Dispute Draft Letter'}</span>
+                </button>
+              </div>
+            )}
+          </div>
+
+          {/* Dispute Draft Letter Modal */}
+          {showDisputeModal && disputeLetter && (
+            <div className="p-4 bg-amber-50 border border-amber-300 rounded-2xl space-y-2 animate-in fade-in">
+              <div className="flex items-center justify-between">
+                <span className="font-bold text-amber-900 text-xs flex items-center space-x-1">
+                  <FileText className="w-4 h-4 text-amber-700" />
+                  <span>Formal Acquirer Dispute Letter ({activeLang.toUpperCase()})</span>
+                </span>
+                <button
+                  onClick={handleCopyDispute}
+                  className="px-2 py-1 bg-white border border-amber-300 rounded-lg text-[10px] font-bold text-amber-900 hover:bg-amber-100"
+                >
+                  {disputeCopied ? 'Copied!' : 'Copy Letter'}
+                </button>
+              </div>
+              <pre className="p-3 bg-white border border-amber-200 rounded-xl text-[10px] text-slate-800 font-mono whitespace-pre-wrap max-h-48 overflow-y-auto">
+                {disputeLetter[activeLang] || disputeLetter.english}
+              </pre>
+            </div>
+          )}
+
           {/* Compliance Disclaimer */}
-          <div className="p-3 rounded-2xl bg-slate-100 text-slate-500 text-[10px] leading-relaxed text-center">
-            Simulated payment record generated for educational and settlement auditing purposes. No actual bank transfer occurred.
+          <div className="p-3 rounded-2xl bg-amber-50/60 border border-amber-200 text-amber-900 text-[10px] leading-relaxed text-center font-bold">
+            DEMO PAYMENT — NO REAL MONEY TRANSFERRED.
           </div>
         </div>
 

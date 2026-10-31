@@ -42,15 +42,52 @@ export default function PaymentModal({ recipient, isOpen, onClose, onPaymentSucc
 
   // Live client-side estimate preview (actual calculation happens on backend)
   const getEstimatedFee = () => {
-    if (!isMerchant) return { fee: 0, gst: 0, net: numericAmount, label: '0% P2P Exemption' };
-    if (numericAmount <= 2000) return { fee: 0, gst: 0, net: numericAmount, label: '0% Tier (≤ ₹2,000)' };
-    const fee = Math.min(numericAmount * 0.004, 300);
+    if (!isMerchant) return { fee: 0, gst: 0, net: numericAmount, label: '0% P2P Personal Exemption' };
+    
+    // Check if recipient is an eligible small merchant under P2PM
+    if (recipient.p2pm_eligible && (recipient.monthly_eligible_receipts || 0) <= 100000) {
+      return { fee: 0, gst: 0, net: numericAmount, label: '0% P2PM Small Merchant Exemption' };
+    }
+
+    const cat = (recipient.business_category || '').toLowerCase();
+    const subcat = (recipient.business_subcategory || '').toLowerCase();
+    const isEssential = cat.includes('essential') || subcat.includes('petrol') || subcat.includes('fuel') || subcat.includes('telecom') || cat.includes('insurance') || cat.includes('railway') || subcat.includes('utility');
+    const isCapital = cat.includes('capital') || subcat.includes('stockbroker') || subcat.includes('securities') || subcat.includes('asset management');
+
+    if (numericAmount <= 2000) {
+      return { fee: 0, gst: 0, net: numericAmount, label: '0% Threshold Concession (≤ ₹2,000)' };
+    }
+
+    if (isEssential) {
+      const fee = 5.0;
+      const gst = 0.90;
+      return {
+        fee: fee,
+        gst: gst,
+        net: numericAmount - (fee + gst),
+        label: 'Essential Sector Flat ₹5.00 MDR + ₹0.90 GST'
+      };
+    }
+
+    if (isCapital) {
+      const fee = Math.min(numericAmount * 0.0002, 300.0);
+      const gst = fee * 0.18;
+      return {
+        fee: fee,
+        gst: gst,
+        net: numericAmount - (fee + gst),
+        label: numericAmount >= 1500000 ? 'Capital Markets 0.02% (Capped at ₹300)' : 'Capital Markets 0.02% MDR + 18% GST'
+      };
+    }
+
+    // Default General Merchant
+    const fee = numericAmount * 0.004;
     const gst = fee * 0.18;
     return {
       fee: fee,
       gst: gst,
       net: numericAmount - (fee + gst),
-      label: numericAmount >= 75000 ? '0.4% Capped at ₹300' : '0.4% UPI MDR + 18% GST',
+      label: 'General Merchant 0.40% MDR + 18% GST',
     };
   };
 
@@ -175,8 +212,8 @@ export default function PaymentModal({ recipient, isOpen, onClose, onPaymentSucc
               )}
             </div>
 
-            <div className="mt-4 p-2.5 bg-sky-50 rounded-xl border border-sky-200 text-[10px] font-bold text-[#002970] uppercase">
-              SIMULATED PAYMENT — NO REAL MONEY TRANSFERRED
+            <div className="mt-4 p-2.5 bg-amber-50 rounded-xl border border-amber-200 text-[11px] font-black text-amber-800 tracking-wider">
+              DEMO PAYMENT — NO REAL MONEY TRANSFERRED.
             </div>
 
             <button
@@ -304,9 +341,9 @@ export default function PaymentModal({ recipient, isOpen, onClose, onPaymentSucc
               </div>
 
               {/* Disclaimer */}
-              <div className="text-center">
-                <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider block">
-                  SIMULATED PAYMENT — NO REAL MONEY TRANSFERRED
+              <div className="text-center p-2 rounded-xl bg-amber-50/70 border border-amber-200/60">
+                <span className="text-[10px] font-black text-amber-800 tracking-wider block">
+                  DEMO PAYMENT — NO REAL MONEY TRANSFERRED.
                 </span>
               </div>
 

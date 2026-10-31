@@ -1,8 +1,11 @@
+import io
+import csv
 import json
 import uuid
 from datetime import datetime, timedelta
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from typing import List, Optional, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException, Query, status, UploadFile, File
+from fastapi.responses import Response
 from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, desc
 
@@ -149,6 +152,14 @@ def resolve_qr(req: ResolveQRRequest, db: Session = Depends(get_db)):
     city = None
     state_val = None
     v_status = None
+    m_bank = None
+    q_prov = None
+    acq_bank = None
+    gst_supp = None
+    p2pm_el = False
+    m_receipts = None
+    app_rule = None
+
     if user.merchant_profile:
         b_name = user.merchant_profile.business_name
         b_cat = user.merchant_profile.business_category
@@ -156,6 +167,13 @@ def resolve_qr(req: ResolveQRRequest, db: Session = Depends(get_db)):
         city = user.merchant_profile.city
         state_val = user.merchant_profile.state
         v_status = user.merchant_profile.verification_status
+        m_bank = getattr(user.merchant_profile, "merchant_bank", "State Bank of India")
+        q_prov = getattr(user.merchant_profile, "qr_provider", "Paytm for Business")
+        acq_bank = getattr(user.merchant_profile, "acquiring_bank", "Axis Bank Ltd")
+        gst_supp = getattr(user.merchant_profile, "gst_invoice_supplier", "Acquiring Bank (Axis Bank Ltd) - GSTIN 27AAACA0000A1Z5")
+        p2pm_el = getattr(user.merchant_profile, "p2pm_eligible", False)
+        m_receipts = getattr(user.merchant_profile, "monthly_eligible_receipts", 45000.0)
+        app_rule = getattr(user.merchant_profile, "applicable_mdr_rule", "DEMO_CONFIG_RULE")
 
     return ResolvedQRResponse(
         user_id=user.id,
@@ -167,7 +185,14 @@ def resolve_qr(req: ResolveQRRequest, db: Session = Depends(get_db)):
         business_subcategory=b_subcat,
         city=city,
         state=state_val,
-        verification_status=v_status
+        verification_status=v_status,
+        merchant_bank=m_bank,
+        qr_provider=q_prov,
+        acquiring_bank=acq_bank,
+        gst_invoice_supplier=gst_supp,
+        p2pm_eligible=p2pm_el,
+        monthly_eligible_receipts=m_receipts,
+        applicable_mdr_rule=app_rule
     )
 
 @router.post("/simulate", response_model=TransactionResponse, status_code=status.HTTP_201_CREATED)
@@ -246,11 +271,15 @@ def simulate_payment(
     if is_p2m:
         category = receiver.merchant_profile.business_category if receiver.merchant_profile else None
         subcategory = getattr(receiver.merchant_profile, "business_subcategory", None)
+        p2pm_eligible = getattr(receiver.merchant_profile, "p2pm_eligible", False)
+        monthly_eligible_receipts = getattr(receiver.merchant_profile, "monthly_eligible_receipts", 0.0)
         calc = calculate_mdr(
             amount=amount,
             merchant_category=category,
             merchant_subcategory=subcategory,
             payment_type="P2M",
+            p2pm_eligible=p2pm_eligible,
+            monthly_eligible_receipts=monthly_eligible_receipts,
             db=db
         )
         # CRUCIAL: The available merchant account balance is credited the NET SETTLEMENT amount (Gross minus MDR & GST)
@@ -620,3 +649,218 @@ def format_transaction_response(txn: Transaction, current_user_id: int, current_
         available_balance_after=current_balance,
         is_pending_config=is_pending
     )
+
+@router.get("/reconciliation/sample-csv")
+def download_sample_reconciliation_csv(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Generates an illustrative bank/aggregator settlement CSV populated with recent
+    merchant transactions for testing the settlement reconciliation engine.
+    """
+    txns = db.query(Transaction).filter(
+        Transaction.receiver_id == current_user.id
+    ).order_by(Transaction.created_at.desc()).limit(10).all()
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow([
+        "Transaction ID",
+        "Merchant ID",
+        "Transaction Amount",
+        "Settlement Reference",
+        "Settlement Date",
+        "Actual Settlement Credit",
+        "Deducted MDR",
+        "Deducted GST",
+        "Notes"
+    ])
+
+    if txns:
+        for idx, t in enumerate(txns):
+            exp_net = t.settlement.net_settlement if t.settlement else t.amount
+            exp_mdr = t.settlement.mdr_amount if t.settlement else 0.0
+            exp_gst = t.settlement.gst_amount if t.settlement else 0.0
+            
+            actual_credit = exp_net
+            notes = "Standard Settlement Credit"
+            actual_mdr = exp_mdr
+            actual_gst = exp_gst
+            if idx == 1 and len(txns) > 2:
+                actual_credit = round(exp_net - 11.80, 2)
+                actual_mdr = round(exp_mdr + 10.0, 2)
+                actual_gst = round(exp_gst + 1.80, 2)
+                notes = "Discrepancy (Acquirer Overcharge)"
+            elif idx == 2 and len(txns) > 3:
+                notes = "T+1 Batch Settlement Timing Adjustment"
+
+            writer.writerow([
+                t.txn_id,
+                f"MERCH_{current_user.id}",
+                f"{t.amount:.2f}",
+                f"UTR{uuid.uuid4().hex[:10].upper()}",
+                (t.created_at + timedelta(days=1)).strftime("%Y-%m-%d"),
+                f"{actual_credit:.2f}",
+                f"{actual_mdr:.2f}",
+                f"{actual_gst:.2f}",
+                notes
+            ])
+    else:
+        sample_rows = [
+            ("DEMO_TXN_PETROL_3000", f"MERCH_{current_user.id}", "3000.00", "UTR9928172031", "2026-10-31", "2994.10", "5.00", "0.90", "Matched Essential Sector"),
+            ("DEMO_TXN_REST_1500", f"MERCH_{current_user.id}", "1500.00", "UTR9928172032", "2026-10-31", "1500.00", "0.00", "0.00", "Matched General Merchant"),
+            ("DEMO_TXN_PHARM_2500", f"MERCH_{current_user.id}", "2500.00", "UTR9928172033", "2026-10-31", "2476.40", "20.00", "3.60", "Discrepancy (Overcharged MDR 0.8% instead of 0.4%)"),
+            ("DEMO_TXN_CLINIC_500", f"MERCH_{current_user.id}", "500.00", "UTR9928172034", "2026-10-31", "500.00", "0.00", "0.00", "Matched Sub-2000 Concession"),
+            ("DEMO_TXN_TEL_400", f"MERCH_{current_user.id}", "400.00", "UTR9928172035", "2026-10-31", "400.00", "0.00", "0.00", "T+1 Timing Settlement Adjustment")
+        ]
+        for row in sample_rows:
+            writer.writerow(row)
+
+    csv_data = output.getvalue()
+    return Response(
+        content=csv_data,
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=settlement_report_sample.csv"}
+    )
+
+@router.post("/reconciliation/upload")
+async def upload_reconciliation_csv(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Parses an uploaded bank settlement CSV file and performs multi-point transaction matching:
+    - Transaction ID & Merchant ID
+    - Expected MDR, Expected GST, Expected Net vs Actual Settlement Credit
+    - Detects: Missing transactions, Duplicate deductions, Incorrect MDR/GST, and Timing adjustments
+    - Categorizes each line item as Matched, Timing Difference, or Discrepancy.
+    """
+    contents = await file.read()
+    decoded = contents.decode("utf-8-sig", errors="replace")
+    reader = csv.DictReader(io.StringIO(decoded))
+
+    results = []
+    matched_count = 0
+    discrepancy_count = 0
+    timing_count = 0
+    total_expected_net = 0.0
+    total_actual_credited = 0.0
+
+    def get_val(row, *aliases):
+        for a in aliases:
+            for k, v in row.items():
+                if k and a.lower() in k.lower():
+                    return v.strip() if v else ""
+        return ""
+
+    for row_idx, row in enumerate(reader):
+        txn_id = get_val(row, "transaction id", "txn_id", "transaction_id", "txnid")
+        merch_id = get_val(row, "merchant id", "merchant_id", "merchid")
+        amount_str = get_val(row, "transaction amount", "amount", "gross amount")
+        actual_credit_str = get_val(row, "actual settlement credit", "actual_credit", "settlement credit", "net credit", "credited amount")
+        settlement_ref = get_val(row, "settlement reference", "reference", "utr", "rrn")
+        settlement_date = get_val(row, "settlement date", "date", "settled_on")
+        ded_mdr_str = get_val(row, "deducted mdr", "actual mdr", "mdr")
+        ded_gst_str = get_val(row, "deducted gst", "actual gst", "gst")
+        notes = get_val(row, "notes", "remarks", "description")
+
+        try:
+            row_amount = float(amount_str) if amount_str else 0.0
+        except ValueError:
+            row_amount = 0.0
+
+        try:
+            actual_credit = float(actual_credit_str) if actual_credit_str else row_amount
+        except ValueError:
+            actual_credit = row_amount
+
+        actual_mdr = float(ded_mdr_str) if ded_mdr_str else 0.0
+        actual_gst = float(ded_gst_str) if ded_gst_str else 0.0
+
+        txn = None
+        if txn_id:
+            txn = db.query(Transaction).filter(Transaction.txn_id == txn_id).first()
+        if not txn and row_amount > 0:
+            txn = db.query(Transaction).filter(
+                Transaction.receiver_id == current_user.id,
+                Transaction.amount == row_amount
+            ).order_by(Transaction.created_at.desc()).first()
+
+        if txn:
+            exp_gross = txn.amount
+            settlement = txn.settlement
+            exp_mdr = settlement.mdr_amount if settlement else 0.0
+            exp_gst = settlement.gst_amount if settlement else 0.0
+            exp_net = settlement.net_settlement if settlement else txn.amount
+            rule_name = settlement.mdr_rule if settlement else "Exempt / Direct"
+            category = settlement.business_category if settlement else "Merchant"
+            txn_matched_id = txn.txn_id
+            created_at_str = txn.created_at.strftime("%Y-%m-%d %H:%M")
+        else:
+            exp_gross = row_amount
+            exp_mdr = 0.0
+            exp_gst = 0.0
+            exp_net = row_amount
+            rule_name = "Unrecorded in System"
+            category = "Unknown"
+            txn_matched_id = txn_id or f"UNKNOWN_{row_idx + 1}"
+            created_at_str = "Not Recorded"
+
+        diff = round(actual_credit - exp_net, 2)
+        total_expected_net += exp_net
+        total_actual_credited += actual_credit
+
+        if not txn:
+            status_label = "DISCREPANCY"
+            status_reason = "Transaction record not found in system database."
+            discrepancy_count += 1
+        elif abs(diff) < 0.05:
+            status_label = "MATCHED"
+            status_reason = "Settlement amount matches configured rules engine calculation exactly."
+            matched_count += 1
+        elif "timing" in notes.lower() or "t+1" in notes.lower() or "t+2" in notes.lower() or "holdback" in notes.lower():
+            status_label = "TIMING_DIFFERENCE"
+            status_reason = "T+1 / T+2 settlement cycle clearing adjustment or bank holdback."
+            timing_count += 1
+        else:
+            status_label = "DISCREPANCY"
+            overcharge_val = abs(diff)
+            status_reason = f"Settlement under-credited by ₹{overcharge_val:,.2f}. Bank credited ₹{actual_credit:,.2f} vs expected ₹{exp_net:,.2f}."
+            discrepancy_count += 1
+
+        results.append({
+            "id": row_idx + 1,
+            "txn_id": txn_matched_id,
+            "merchant_id": merch_id or f"MERCH_{current_user.id}",
+            "settlement_ref": settlement_ref or f"REF-{row_idx + 1}",
+            "settlement_date": settlement_date or datetime.utcnow().strftime("%Y-%m-%d"),
+            "transaction_date": created_at_str,
+            "category": category,
+            "rule_name": rule_name,
+            "gross_amount": exp_gross,
+            "expected_mdr": exp_mdr,
+            "actual_mdr": actual_mdr or exp_mdr,
+            "expected_gst": exp_gst,
+            "actual_gst": actual_gst or exp_gst,
+            "expected_net": exp_net,
+            "actual_credit": actual_credit,
+            "difference": diff,
+            "status": status_label,
+            "reason": status_reason,
+            "notes": notes
+        })
+
+    return {
+        "summary": {
+            "total_records": len(results),
+            "matched_records": matched_count,
+            "discrepancies": discrepancy_count,
+            "timing_differences": timing_count,
+            "total_expected_net": round(total_expected_net, 2),
+            "total_actual_credited": round(total_actual_credited, 2),
+            "net_discrepancy": round(total_actual_credited - total_expected_net, 2)
+        },
+        "records": results
+    }

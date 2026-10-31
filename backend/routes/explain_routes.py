@@ -6,7 +6,11 @@ from database import get_db
 from models import User, Transaction, TransactionSettlement
 from auth import get_current_user
 from cognee_memory import recall_memories, save_memory
-from llm_explainer import generate_vernacular_story
+from llm_explainer import (
+    generate_vernacular_story,
+    explain_single_transaction,
+    generate_dispute_letter
+)
 from sarvam_voice import synthesize_sarvam_speech
 
 router = APIRouter(prefix="/api/explain", tags=["LLM Explainer & Sarvam Voice"])
@@ -155,4 +159,112 @@ def set_preferred_language(
         data={"preferred_language": req.language}
     )
     return {"status": "success", "preferred_language": req.language}
+
+class DisputeDraftRequest(BaseModel):
+    txn_id: str
+    actual_deducted_mdr: float
+    actual_deducted_gst: float
+    language: Optional[str] = "English"
+
+@router.get("/transaction/{txn_id}")
+def get_transaction_explanation(
+    txn_id: str,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Returns AI Merchant Assistant explanations in English, Hindi, and Kannada
+    for a specific transaction, strictly grounded in the rules engine calculation.
+    """
+    txn = db.query(Transaction).filter(Transaction.txn_id == txn_id).first()
+    if not txn:
+        raise HTTPException(status_code=404, detail="Transaction not found.")
+
+    settlement = txn.settlement
+    if not settlement:
+        return {
+            "txn_id": txn.txn_id,
+            "amount": txn.amount,
+            "category": "P2P / Personal",
+            "mdr_rate": "0%",
+            "mdr_amount": 0.0,
+            "gst_amount": 0.0,
+            "net_settlement": txn.amount,
+            "explanations": {
+                "english": f"Personal P2P transfer of ₹{txn.amount:,.2f} is 100% exempt from merchant MDR and GST.",
+                "hindi": f"व्यक्तिगत P2P ट्रांसफर (₹{txn.amount:,.2f}) पर 0% MDR और GST छूट लागू है।",
+                "kannada": f"ವೈಯಕ್ತಿಕ P2P ವರ್ಗಾವಣೆ (₹{txn.amount:,.2f}) ಮೇಲೆ ಯಾವುದೇ MDR ಅಥವಾ GST ಕಡಿತವಿಲ್ಲ."
+            }
+        }
+
+    # Retrieve merchant profile details
+    merchant_user = txn.receiver
+    p2pm_el = False
+    if merchant_user and merchant_user.merchant_profile:
+        p2pm_el = getattr(merchant_user.merchant_profile, "p2pm_eligible", False)
+
+    explanations = explain_single_transaction(
+        amount=txn.amount,
+        category=settlement.business_category or "General Merchant",
+        subcategory=settlement.business_subcategory,
+        mdr_rate=settlement.mdr_rate,
+        mdr_amount=settlement.mdr_amount,
+        gst_amount=settlement.gst_amount,
+        net_settlement=settlement.net_settlement,
+        rule_name=settlement.mdr_rule,
+        p2pm_eligible=p2pm_el
+    )
+
+    return {
+        "txn_id": txn.txn_id,
+        "amount": txn.amount,
+        "category": settlement.business_category,
+        "subcategory": settlement.business_subcategory,
+        "mdr_rate": settlement.mdr_rate,
+        "mdr_amount": settlement.mdr_amount,
+        "gst_amount": settlement.gst_amount,
+        "total_deductions": settlement.total_deductions,
+        "net_settlement": settlement.net_settlement,
+        "rule_name": settlement.mdr_rule,
+        "explanations": explanations
+    }
+
+@router.post("/dispute-draft")
+def get_dispute_draft(
+    req: DisputeDraftRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Generates a formal dispute draft letter in English, Hindi, and Kannada
+    for reporting incorrect settlement deductions to the acquiring bank / QR provider.
+    """
+    txn = db.query(Transaction).filter(Transaction.txn_id == req.txn_id).first()
+    if not txn:
+        raise HTTPException(status_code=404, detail="Transaction not found.")
+
+    expected_mdr = txn.settlement.mdr_amount if txn.settlement else 0.0
+    expected_gst = txn.settlement.gst_amount if txn.settlement else 0.0
+
+    b_name = current_user.merchant_profile.business_name if current_user.merchant_profile else current_user.full_name
+    m_bank = getattr(current_user.merchant_profile, "merchant_bank", "State Bank of India") if current_user.merchant_profile else "State Bank of India"
+    q_prov = getattr(current_user.merchant_profile, "qr_provider", "Paytm for Business") if current_user.merchant_profile else "Paytm for Business"
+    acq_bank = getattr(current_user.merchant_profile, "acquiring_bank", "Axis Bank Ltd") if current_user.merchant_profile else "Axis Bank Ltd"
+
+    letter_bundle = generate_dispute_letter(
+        merchant_name=current_user.full_name,
+        business_name=b_name,
+        acquiring_bank=acq_bank,
+        merchant_bank=m_bank,
+        qr_provider=q_prov,
+        txn_id=txn.txn_id,
+        gross_amount=txn.amount,
+        expected_mdr=expected_mdr,
+        actual_deducted_mdr=req.actual_deducted_mdr,
+        expected_gst=expected_gst,
+        actual_deducted_gst=req.actual_deducted_gst,
+        language=req.language or "English"
+    )
+
+    return letter_bundle
 from datetime import datetime

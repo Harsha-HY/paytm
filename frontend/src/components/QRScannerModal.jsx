@@ -1,7 +1,7 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { Html5Qrcode } from 'html5-qrcode';
 import { apiRequest } from '../api/client';
-import { Camera, X, AlertCircle, Sparkles, Keyboard, CheckCircle2, ArrowRight } from 'lucide-react';
+import { Camera, X, AlertCircle, Sparkles, Keyboard, CheckCircle2, ArrowRight, RefreshCw, ShieldCheck } from 'lucide-react';
 
 export default function QRScannerModal({ isOpen, onClose, onTargetResolved }) {
   const [activeMode, setActiveMode] = useState('camera'); // 'camera' | 'manual'
@@ -9,8 +9,13 @@ export default function QRScannerModal({ isOpen, onClose, onTargetResolved }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [cameraPermission, setCameraPermission] = useState('prompt'); // 'prompt' | 'granted' | 'denied'
+  const [availableCameras, setAvailableCameras] = useState([]);
+  const [selectedCameraId, setSelectedCameraId] = useState(null);
+  const [facingMode, setFacingMode] = useState('environment'); // 'environment' | 'user'
+
   const scannerRef = useRef(null);
   const fileInputRef = useRef(null);
+  const hasScannedRef = useRef(false);
 
   const handleFileUpload = async (e) => {
     const file = e.target.files?.[0];
@@ -29,6 +34,24 @@ export default function QRScannerModal({ isOpen, onClose, onTargetResolved }) {
     }
   };
 
+  // Enumerate cameras
+  useEffect(() => {
+    if (isOpen) {
+      hasScannedRef.current = false;
+      Html5Qrcode.getCameras().then(devices => {
+        if (devices && devices.length) {
+          setAvailableCameras(devices);
+          // Default to back/environment camera if found
+          const backCam = devices.find(d => d.label.toLowerCase().includes('back') || d.label.toLowerCase().includes('environment'));
+          setSelectedCameraId(backCam ? backCam.id : devices[0].id);
+        }
+      }).catch(err => {
+        console.warn('Unable to enumerate video devices:', err);
+      });
+    }
+  }, [isOpen]);
+
+  // Start / Stop Camera Scanner
   useEffect(() => {
     if (!isOpen || activeMode !== 'camera') {
       stopScanner();
@@ -41,6 +64,9 @@ export default function QRScannerModal({ isOpen, onClose, onTargetResolved }) {
     async function startScanner() {
       try {
         setError('');
+        // Ensure prior scanner is cleanly stopped
+        await stopScanner();
+
         const html5QrCode = new Html5Qrcode(scannerElementId);
         scannerRef.current = html5QrCode;
 
@@ -50,11 +76,16 @@ export default function QRScannerModal({ isOpen, onClose, onTargetResolved }) {
           aspectRatio: 1.0,
         };
 
+        const cameraConfig = selectedCameraId
+          ? selectedCameraId
+          : { facingMode: facingMode };
+
         await html5QrCode.start(
-          { facingMode: 'environment' },
+          cameraConfig,
           config,
           (decodedText) => {
-            if (isMounted) {
+            if (isMounted && !hasScannedRef.current) {
+              hasScannedRef.current = true;
               handleCodeScanned(decodedText);
             }
           },
@@ -75,7 +106,7 @@ export default function QRScannerModal({ isOpen, onClose, onTargetResolved }) {
       isMounted = false;
       stopScanner();
     };
-  }, [isOpen, activeMode]);
+  }, [isOpen, activeMode, selectedCameraId, facingMode]);
 
   const stopScanner = async () => {
     if (scannerRef.current) {
@@ -89,6 +120,12 @@ export default function QRScannerModal({ isOpen, onClose, onTargetResolved }) {
       }
       scannerRef.current = null;
     }
+  };
+
+  const switchCameraFacing = async () => {
+    const nextMode = facingMode === 'environment' ? 'user' : 'environment';
+    setFacingMode(nextMode);
+    setSelectedCameraId(null);
   };
 
   const handleCodeScanned = async (code) => {
@@ -109,14 +146,23 @@ export default function QRScannerModal({ isOpen, onClose, onTargetResolved }) {
     setLoading(true);
     setError('');
     try {
+      let cleanCode = code.trim();
+      if (cleanCode.startsWith('{') && cleanCode.includes('qr_code')) {
+        try {
+          const parsed = JSON.parse(cleanCode);
+          cleanCode = parsed.qr_code || cleanCode;
+        } catch (e) {}
+      }
+
       const recipient = await apiRequest('/payments/resolve-qr', {
         method: 'POST',
-        body: JSON.stringify({ qr_code: code }),
+        body: JSON.stringify({ qr_code: cleanCode }),
       });
       onClose();
       onTargetResolved(recipient);
     } catch (err) {
-      setError(err.message || 'Invalid or unregistered QR code.');
+      setError(err.message || 'Invalid or unregistered QR code. Please try again.');
+      hasScannedRef.current = false;
     } finally {
       setLoading(false);
     }
@@ -135,11 +181,14 @@ export default function QRScannerModal({ isOpen, onClose, onTargetResolved }) {
             </div>
             <div>
               <h3 className="font-bold text-slate-900 text-base">Scan QR to Pay</h3>
-              <p className="text-[11px] text-slate-500">Scan Personal or Merchant QR Code</p>
+              <p className="text-[11px] text-slate-500">Scan Personal or Demo Merchant QR Code</p>
             </div>
           </div>
           <button
-            onClick={onClose}
+            onClick={() => {
+              stopScanner();
+              onClose();
+            }}
             className="text-slate-400 hover:text-slate-700 p-1 rounded-lg hover:bg-slate-100 transition-colors"
           >
             <X className="w-5 h-5" />
@@ -209,12 +258,27 @@ export default function QRScannerModal({ isOpen, onClose, onTargetResolved }) {
                 </div>
               )}
 
+              {/* Camera Switch Floating Button */}
+              {cameraPermission === 'granted' && (
+                <div className="absolute top-2 right-2 z-10">
+                  <button
+                    type="button"
+                    onClick={switchCameraFacing}
+                    title="Flip between Front and Rear camera"
+                    className="p-2 bg-slate-900/80 hover:bg-slate-800 text-white rounded-xl backdrop-blur-xs text-xs flex items-center space-x-1 border border-white/20 transition-all cursor-pointer"
+                  >
+                    <RefreshCw className="w-3.5 h-3.5 text-[#00BAF2]" />
+                    <span className="text-[10px] font-medium">{facingMode === 'environment' ? 'Rear Cam' : 'Front Cam'}</span>
+                  </button>
+                </div>
+              )}
+
               {cameraPermission === 'denied' && (
                 <div className="p-6 text-center text-slate-300 space-y-2">
                   <Camera className="w-10 h-10 mx-auto text-[#00BAF2] opacity-80" />
-                  <p className="text-xs font-semibold text-white">Live Camera Stream Unavailable</p>
+                  <p className="text-xs font-semibold text-white">Live Camera Access Required</p>
                   <p className="text-[11px] text-slate-400">
-                    Mobile browsers require HTTPS for live video. Use the button below to snap a photo with your phone camera directly!
+                    Browsers require <strong>HTTPS</strong> or <strong>localhost</strong> for live camera streaming. Please allow camera permissions in your browser or use the photo snap button below!
                   </p>
                 </div>
               )}
@@ -238,6 +302,13 @@ export default function QRScannerModal({ isOpen, onClose, onTargetResolved }) {
               <Camera className="w-4 h-4" />
               <span>{loading ? 'Scanning Photo...' : '📷 Snap Photo with Phone Camera / Upload QR'}</span>
             </button>
+
+            <div className="p-2 rounded-xl bg-slate-50 border border-slate-200 text-[10px] text-slate-600 flex items-center space-x-2">
+              <ShieldCheck className="w-4 h-4 text-emerald-600 shrink-0" />
+              <span>
+                <strong>HTTPS Active:</strong> Live scanning is securely enabled on localhost and mobile browsers with SSL.
+              </span>
+            </div>
           </div>
         )}
 
@@ -246,17 +317,17 @@ export default function QRScannerModal({ isOpen, onClose, onTargetResolved }) {
           <form onSubmit={handleManualSubmit} className="space-y-4 py-2">
             <div>
               <label className="block text-xs font-bold text-slate-700 mb-1 uppercase tracking-wider">
-                Enter QR Identifier *
+                Enter Demo Merchant / User QR Identifier *
               </label>
               <input
                 type="text"
                 value={manualCode}
                 onChange={(e) => setManualCode(e.target.value)}
-                placeholder="e.g. MDR-PAY-4-C47E6460"
+                placeholder="e.g. MDR-PAY-20-3E7F6F19"
                 className="w-full px-3.5 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#002970] focus:bg-white"
               />
               <span className="text-[11px] text-slate-400 mt-1 block">
-                Type or paste the unique QR code of any registered user or merchant.
+                Type or paste the unique QR code of any registered user or demo merchant.
               </span>
             </div>
 
@@ -280,7 +351,7 @@ export default function QRScannerModal({ isOpen, onClose, onTargetResolved }) {
         {/* Disclaimer */}
         <div className="mt-4 pt-3 border-t border-slate-100 text-center">
           <span className="text-[10px] font-bold text-slate-400 uppercase tracking-wider">
-            SIMULATED PAYMENT — NO REAL MONEY TRANSFERRED
+            DEMO PAYMENT — NO REAL MONEY TRANSFERRED.
           </span>
         </div>
       </div>
