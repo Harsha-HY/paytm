@@ -98,7 +98,7 @@ export default function MerchantDashboard() {
     loadWallet();
     loadDailyAnalysis(selectedDate);
 
-    // Instant WebSocket synchronization
+    // Event-driven WebSocket synchronization (updates only when an actual transaction/status change occurs)
     const unsubscribe = realtime.subscribe((event) => {
       if (
         event.type === 'TRANSACTION_CREATED' ||
@@ -114,25 +114,8 @@ export default function MerchantDashboard() {
       }
     });
 
-    // Smart polling heartbeat (every 3 seconds for guaranteed live sync)
-    const interval = setInterval(() => {
-      loadWallet();
-      loadDailyAnalysis(selectedDate);
-    }, 3000);
-
-    // Refresh immediately on tab focus or screen unlock
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        loadWallet();
-        loadDailyAnalysis(selectedDate);
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-
     return () => {
       unsubscribe();
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [selectedDate]);
 

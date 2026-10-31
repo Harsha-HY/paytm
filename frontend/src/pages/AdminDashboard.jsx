@@ -244,7 +244,7 @@ export default function AdminDashboard() {
   useEffect(() => {
     refreshAll();
 
-    // Subscribe to Real-Time WebSocket Channel
+    // Subscribe to Real-Time WebSocket Channel (event-driven updates only when new activity occurs)
     const unsubscribe = realtime.subscribe((event) => {
       console.log('[Admin Realtime Event Received]:', event.type);
       loadStats();
@@ -259,25 +259,8 @@ export default function AdminDashboard() {
       }
     });
 
-    // Smart polling heartbeat (every 3 seconds for guaranteed live stats and transactions)
-    const interval = setInterval(() => {
-      loadStats();
-      loadTransactions();
-    }, 3000);
-
-    // Refresh immediately on tab focus or screen unlock
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        loadStats();
-        loadTransactions();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-
     return () => {
       unsubscribe();
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, []);
 

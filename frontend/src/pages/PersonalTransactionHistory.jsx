@@ -55,20 +55,16 @@ export default function PersonalTransactionHistory() {
       fetchTransactions();
     }, 250);
 
+    // Event-driven WebSocket synchronization (updates only when an actual transaction/topup occurs)
     const unsubscribe = realtime.subscribe((event) => {
       if (event.type === 'TRANSACTION_CREATED' || event.type === 'WALLET_TOPPED_UP') {
         fetchTransactions();
       }
     });
 
-    const interval = setInterval(() => {
-      fetchTransactions();
-    }, 3000);
-
     return () => {
       clearTimeout(timer);
       unsubscribe();
-      clearInterval(interval);
     };
   }, [search, directionFilter, typeFilter, dateFilter]);
 

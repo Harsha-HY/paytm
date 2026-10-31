@@ -73,7 +73,7 @@ export default function PersonalDashboard() {
   useEffect(() => {
     loadData();
 
-    // Instant WebSocket synchronization
+    // Event-driven WebSocket synchronization (updates only when an actual transaction/topup occurs)
     const unsubscribe = realtime.subscribe((event) => {
       if (
         event.type === 'TRANSACTION_CREATED' ||
@@ -83,23 +83,8 @@ export default function PersonalDashboard() {
       }
     });
 
-    // Smart polling heartbeat (every 3 seconds for guaranteed live sync)
-    const interval = setInterval(() => {
-      loadData();
-    }, 3000);
-
-    // Refresh immediately on tab focus or screen unlock
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') {
-        loadData();
-      }
-    };
-    document.addEventListener('visibilitychange', handleVisibility);
-
     return () => {
       unsubscribe();
-      clearInterval(interval);
-      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, []);
 

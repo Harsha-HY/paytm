@@ -62,6 +62,7 @@ export default function MerchantTransactionHistory() {
       fetchTransactions();
     }, 250);
 
+    // Event-driven WebSocket synchronization (updates only when an actual transaction/topup occurs)
     const unsubscribe = realtime.subscribe((event) => {
       if (
         event.type === 'TRANSACTION_CREATED' ||
@@ -72,14 +73,9 @@ export default function MerchantTransactionHistory() {
       }
     });
 
-    const interval = setInterval(() => {
-      fetchTransactions();
-    }, 3000);
-
     return () => {
       clearTimeout(timer);
       unsubscribe();
-      clearInterval(interval);
     };
   }, [search, directionFilter, statusFilter, dateFilter]);
 
