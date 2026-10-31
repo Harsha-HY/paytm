@@ -192,23 +192,109 @@ def calculate_default_regulatory_mdr(
     cat_lower = (category or "").lower()
     sub_lower = (subcategory or "").lower()
 
-    # Petrol bunk special agreement
+    # 1. Petrol bunk / fuel station special OMC agreement
     if "petrol" in cat_lower or "petrol" in sub_lower or "fuel" in sub_lower:
-        if amount <= Decimal("2000"):
+        rule_name = "OMC Fuel Dispensing Schedule (Flat ₹10)"
+        rule_id = "OMC_FUEL_FLAT_10"
+        calc_type = "FIXED"
+        mdr_amt = Decimal("10.00")
+        rate_str = "Flat ₹10.00"
+        cap = 10.0
+
+    # 2. Restaurants & Food Outlets
+    elif "restaurant" in cat_lower or "food" in cat_lower or "dining" in sub_lower or "qsr" in sub_lower:
+        rule_name = "Food Service & Dining Acquiring Tariff (1.50%)"
+        rule_id = "REST_DINING_150"
+        calc_type = "PERCENTAGE"
+        mdr_amt = quantize_curr(amount * Decimal("0.015"))
+        rate_str = "1.50%"
+        cap = None
+
+    # 3. Healthcare & Pharmacy
+    elif "health" in cat_lower or "pharmacy" in cat_lower or "clinic" in sub_lower or "hospital" in sub_lower:
+        calc_type = "CAPPED"
+        cap = 150.0
+        if amount <= Decimal("1000"):
+            rule_name = "Essential Healthcare Concession (≤ ₹1,000 Exempt)"
+            rule_id = "HEALTH_CONCESSION_ZERO"
             mdr_amt = Decimal("0.00")
-            rate_str = "0%"
+            rate_str = "0% (Exempt)"
         else:
-            mdr_amt = Decimal("5.00")
-            rate_str = "Flat ₹5"
-    elif amount <= Decimal("2000"):
-        mdr_amt = Decimal("0.00")
-        rate_str = "0%"
-    elif amount >= Decimal("75000"):
-        mdr_amt = Decimal("300.00")
-        rate_str = "0.40% (Capped at ₹300)"
+            rule_name = "Essential Healthcare Tariff (0.65% Capped at ₹150)"
+            rule_id = "HEALTH_CONCESSION_65"
+            raw_mdr = quantize_curr(amount * Decimal("0.0065"))
+            mdr_amt = min(raw_mdr, Decimal("150.00"))
+            rate_str = "0.65% (Capped at ₹150)"
+
+    # 4. Essential Services - Telecom
+    elif "telecom" in sub_lower or "recharge" in sub_lower:
+        rule_name = "Telecom Micro-Utility Tariff (Flat ₹3)"
+        rule_id = "TELECOM_MICRO_3"
+        calc_type = "FIXED"
+        mdr_amt = Decimal("3.00")
+        rate_str = "Flat ₹3.00"
+        cap = 3.0
+
+    # 5. Essential Services - Broadband / Utilities
+    elif "broadband" in sub_lower or "utility" in sub_lower or "internet" in sub_lower:
+        rule_name = "Digital Utility Pipeline Tariff (0.50% Capped at ₹25)"
+        rule_id = "BROADBAND_UTIL_50"
+        calc_type = "CAPPED"
+        raw_mdr = quantize_curr(amount * Decimal("0.005"))
+        mdr_amt = min(raw_mdr, Decimal("25.00"))
+        rate_str = "0.50% (Capped at ₹25)"
+        cap = 25.0
+
+    # 6. Consumer Electronics & Mobile
+    elif "electronic" in cat_lower or "mobile" in sub_lower or "laptop" in sub_lower:
+        rule_name = "High-Ticket Electronics Acquiring Tariff (0.90% Capped at ₹450)"
+        rule_id = "ELECTRONICS_RETAIL_90"
+        calc_type = "CAPPED"
+        raw_mdr = quantize_curr(amount * Decimal("0.009"))
+        mdr_amt = min(raw_mdr, Decimal("450.00"))
+        rate_str = "0.90% (Capped at ₹450)"
+        cap = 450.0
+
+    # 7. Apparel & Footwear
+    elif "apparel" in cat_lower or "clothing" in sub_lower or "footwear" in sub_lower:
+        rule_name = "Fashion & Lifestyle Retail Tariff (1.20%)"
+        rule_id = "APPAREL_FASHION_120"
+        calc_type = "PERCENTAGE"
+        mdr_amt = quantize_curr(amount * Decimal("0.012"))
+        rate_str = "1.20%"
+        cap = None
+
+    # 8. Grocery & Kirana (Small Retail) - RBI Concession
+    elif "grocery" in cat_lower or "kirana" in cat_lower or "supermarket" in sub_lower:
+        calc_type = "CAPPED"
+        cap = 200.0
+        if amount <= Decimal("2000"):
+            rule_name = "RBI Small Retail Mandate (≤ ₹2,000 0% MDR)"
+            rule_id = "KIRANA_SMALL_RETAIL_ZERO"
+            mdr_amt = Decimal("0.00")
+            rate_str = "0% (Exempt)"
+        else:
+            rule_name = "RBI Small Merchant Schedule (0.40% Capped at ₹200)"
+            rule_id = "KIRANA_SMALL_RETAIL_40"
+            raw_mdr = quantize_curr(amount * Decimal("0.004"))
+            mdr_amt = min(raw_mdr, Decimal("200.00"))
+            rate_str = "0.40% (Capped at ₹200)"
+
+    # 9. Default General Commercial
     else:
-        mdr_amt = quantize_curr(amount * Decimal("0.004"))
-        rate_str = "0.40%"
+        calc_type = "CAPPED"
+        cap = 250.0
+        if amount <= Decimal("500"):
+            rule_name = "General Retail Micro-Tier (≤ ₹500 Exempt)"
+            rule_id = "GENERAL_MICRO_ZERO"
+            mdr_amt = Decimal("0.00")
+            rate_str = "0% (Exempt)"
+        else:
+            rule_name = "General Commercial Merchant Tariff (0.85% Capped at ₹250)"
+            rule_id = "GENERAL_RETAIL_85"
+            raw_mdr = quantize_curr(amount * Decimal("0.0085"))
+            mdr_amt = min(raw_mdr, Decimal("250.00"))
+            rate_str = "0.85% (Capped at ₹250)"
 
     gst_amt = quantize_curr(mdr_amt * Decimal("0.18")) if mdr_amt > Decimal("0.00") else Decimal("0.00")
     total_ded = quantize_curr(mdr_amt + gst_amt)
@@ -216,22 +302,22 @@ def calculate_default_regulatory_mdr(
 
     return {
         "gross_amount": float(amount),
-        "mdr_rule": "Standard NPCI Regulatory Schedule",
-        "rule_id": "DEFAULT_NPCI_V1",
+        "mdr_rule": rule_name,
+        "rule_id": rule_id,
         "rule_version": 1,
         "business_category": category or "Retail",
         "business_subcategory": subcategory,
-        "calculation_type": "CAPPED",
+        "calculation_type": calc_type,
         "applied_rate": rate_str,
-        "applied_cap": 300.0,
+        "applied_cap": cap,
         "mdr_rate": rate_str,
         "mdr_amount": float(mdr_amt),
         "gst_rate": 0.18 if mdr_amt > Decimal("0.00") else 0.0,
         "gst_amount": float(gst_amt),
         "total_deductions": float(total_ded),
         "net_settlement": float(net_settlement),
-        "tax_treatment": "TAXABLE_18",
+        "tax_treatment": "TAXABLE_18" if mdr_amt > Decimal("0.00") else "EXEMPT",
         "is_pending_config": False,
-        "explanation": f"Calculated {rate_str} on ₹{float(amount):.2f}. Deductions: ₹{float(total_ded):.2f}. Net: ₹{float(net_settlement):.2f}.",
+        "explanation": f"Applied {rate_str} on ₹{float(amount):.2f} = ₹{float(mdr_amt):.2f} MDR + ₹{float(gst_amt):.2f} GST (18%). Net bank credit: ₹{float(net_settlement):.2f}.",
         "is_simulated": True
     }
