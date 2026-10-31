@@ -15,27 +15,11 @@ from routes.explain_routes import router as explain_router
 from events import event_manager
 from auth import hash_password
 
-# Initialize tables and seed permanent admin
+# Initialize tables and seed full live ecosystem
 try:
-    Base.metadata.create_all(bind=engine)
-    with SessionLocal() as db:
-        admin = db.query(models.User).filter(models.User.role == "admin").first()
-        if not admin:
-            admin_user = models.User(
-                email="admin@gmail.com",
-                hashed_password=hash_password("12345678"),
-                role="admin",
-                full_name="MDR System Admin"
-            )
-            db.add(admin_user)
-            db.flush()
-            admin_profile = models.AdminProfile(
-                user_id=admin_user.id,
-                department="Regulatory Compliance"
-            )
-            db.add(admin_profile)
-            db.commit()
-            print("[Database] Permanent admin account ready: admin@gmail.com")
+    from migrate_and_seed import migrate_and_seed
+    migrate_and_seed()
+    print("[Database] Live ecosystem and demo transactions verified.")
 except Exception as e:
     print(f"[Database Warning] Table creation / seeding: {e}")
 
