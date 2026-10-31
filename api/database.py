@@ -26,17 +26,21 @@ if "supabase.com" in DATABASE_URL and "sslmode" not in DATABASE_URL:
     DATABASE_URL = f"{DATABASE_URL}{sep}sslmode=require"
 
 is_serverless = bool(os.getenv("VERCEL"))
+db_init_error = None
 
 def create_db_engine():
-    global DATABASE_URL
+    global DATABASE_URL, db_init_error
     urls_to_try = []
-    if DATABASE_URL.startswith("postgresql+psycopg://"):
+    
+    # Supabase session pooler on 5432 and transaction pooler on 6543
+    if "pooler.supabase.com" in DATABASE_URL:
+        # Try port 6543 (transaction pooler) first for serverless
+        if ":5432" in DATABASE_URL:
+            urls_to_try.append(DATABASE_URL.replace(":5432", ":6543"))
         urls_to_try.append(DATABASE_URL)
+        # Try psycopg2
+        urls_to_try.append(DATABASE_URL.replace("postgresql+psycopg://", "postgresql+psycopg2://").replace(":5432", ":6543"))
         urls_to_try.append(DATABASE_URL.replace("postgresql+psycopg://", "postgresql+psycopg2://"))
-    elif DATABASE_URL.startswith("postgresql://"):
-        urls_to_try.append(DATABASE_URL.replace("postgresql://", "postgresql+psycopg://"))
-        urls_to_try.append(DATABASE_URL.replace("postgresql://", "postgresql+psycopg2://"))
-        urls_to_try.append(DATABASE_URL)
     else:
         urls_to_try.append(DATABASE_URL)
 
@@ -46,24 +50,29 @@ def create_db_engine():
             if is_serverless:
                 eng = create_engine(
                     url,
-                    connect_args={"connect_timeout": 15},
+                    connect_args={"connect_timeout": 10},
                     poolclass=NullPool
                 )
             else:
                 eng = create_engine(
                     url,
-                    connect_args={"connect_timeout": 15},
+                    connect_args={"connect_timeout": 10},
                     pool_pre_ping=True,
                     pool_recycle=300,
                     pool_size=10,
                     max_overflow=20
                 )
+            # Verify actual network connection
+            with eng.connect() as conn:
+                pass
+            print(f"[Database] Successfully connected to PostgreSQL via {url.split('@')[-1]}")
             return eng
         except Exception as e:
             last_err = e
             continue
 
-    print(f"[Database Error] All PostgreSQL drivers failed: {last_err}. Using /tmp fallback.")
+    db_init_error = str(last_err)
+    print(f"[Database Error] All PostgreSQL connections failed: {last_err}. Using /tmp SQLite fallback.")
     return create_engine(SQLITE_URL, connect_args={"check_same_thread": False})
 
 engine = create_db_engine()

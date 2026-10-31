@@ -4,7 +4,7 @@ import uvicorn
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
-from database import engine, SessionLocal, Base
+from database import engine, SessionLocal, Base, db_init_error
 import models
 import cognee_memory
 from routes.auth_routes import router as auth_router
@@ -97,12 +97,14 @@ async def websocket_endpoint(websocket: WebSocket):
 @app.get("/api")
 @app.get("/api/")
 def health_check():
+    from database import db_init_error
     return {
         "status": "healthy",
         "service": "MDR Settlement Guardian API",
         "version": "1.0.0",
         "stage": "Stage 3 - LLM Explainer, Cognee Memory & Sarvam Voice",
-        "database": str(engine.url)
+        "database": str(engine.url),
+        "db_error": str(db_init_error)
     }
 
 if __name__ == "__main__":
