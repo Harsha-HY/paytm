@@ -42,9 +42,10 @@ app.add_middleware(
 
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
+    err_str = str(exc)
     return JSONResponse(
         status_code=500,
-        content={"error": str(exc), "traceback": traceback.format_exc()}
+        content={"error": err_str, "detail": err_str, "traceback": traceback.format_exc()}
     )
 
 @app.middleware("http")

@@ -2,7 +2,7 @@ import uuid
 from typing import Optional, List, Dict, Any
 from datetime import datetime
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, desc, asc
 
 from database import get_db
@@ -128,7 +128,7 @@ def get_categories(
     admin: User = Depends(get_current_admin)
 ):
     """Lists all approved business categories and subcategories."""
-    cats = db.query(BusinessCategory).filter(BusinessCategory.is_active == True).all()
+    cats = db.query(BusinessCategory).options(joinedload(BusinessCategory.subcategories)).filter(BusinessCategory.is_active == True).all()
     return cats
 
 # =========================================================================
@@ -416,7 +416,9 @@ def get_all_merchant_qrs(
     admin: User = Depends(get_current_admin)
 ):
     """Lists all registered merchant QR codes with activation status and assigned shop info."""
-    query = db.query(UserQR).join(User, UserQR.user_id == User.id).filter(User.account_type == "merchant")
+    query = db.query(UserQR).options(
+        joinedload(UserQR.user).joinedload(User.merchant_profile)
+    ).join(User, UserQR.user_id == User.id).filter(User.account_type == "merchant")
 
     if status and status != "all":
         query = query.filter(UserQR.qr_status == status.upper())
@@ -580,7 +582,11 @@ def get_all_platform_transactions(
     """Returns all transactions across the entire platform with full credit/debit records and category filtering."""
     from routes.payment_routes import format_transaction_response
 
-    query = db.query(Transaction)
+    query = db.query(Transaction).options(
+        joinedload(Transaction.settlement),
+        joinedload(Transaction.sender),
+        joinedload(Transaction.receiver).joinedload(User.merchant_profile)
+    )
 
     if txn_type and txn_type != "all":
         query = query.filter(Transaction.txn_type == txn_type.upper())

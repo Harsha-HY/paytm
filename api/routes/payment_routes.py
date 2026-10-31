@@ -3,7 +3,7 @@ import uuid
 from datetime import datetime, timedelta
 from typing import List, Optional
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from sqlalchemy.orm import Session
+from sqlalchemy.orm import Session, joinedload
 from sqlalchemy import or_, desc
 
 from database import get_db
@@ -341,7 +341,11 @@ def get_user_transactions(
     current_user: User = Depends(get_current_user)
 ):
     """Returns filtered transaction history for the authenticated user."""
-    query = db.query(Transaction).filter(
+    query = db.query(Transaction).options(
+        joinedload(Transaction.settlement),
+        joinedload(Transaction.sender),
+        joinedload(Transaction.receiver).joinedload(User.merchant_profile)
+    ).filter(
         or_(Transaction.sender_id == current_user.id, Transaction.receiver_id == current_user.id)
     )
 

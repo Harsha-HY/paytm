@@ -54,16 +54,20 @@ def create_db_engine():
     last_err = None
     for url in urls_to_try:
         try:
+            c_args = {"connect_timeout": 12}
+            if "psycopg" in url and "psycopg2" not in url:
+                c_args["prepare_threshold"] = None
+
             if is_serverless:
                 eng = create_engine(
                     url,
-                    connect_args={"connect_timeout": 12},
+                    connect_args=c_args,
                     poolclass=NullPool
                 )
             else:
                 eng = create_engine(
                     url,
-                    connect_args={"connect_timeout": 12},
+                    connect_args=c_args,
                     pool_pre_ping=True,
                     pool_recycle=300,
                     pool_size=10,

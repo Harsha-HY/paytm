@@ -17,11 +17,15 @@ export async function apiRequest(endpoint, options = {}) {
 
   if (!response.ok) {
     let errorMessage = 'An error occurred';
-    if (data && data.detail) {
-      if (Array.isArray(data.detail)) {
-        errorMessage = data.detail.map((err) => err.msg || err.message).join(', ');
-      } else {
-        errorMessage = data.detail;
+    if (data) {
+      if (data.detail) {
+        if (Array.isArray(data.detail)) {
+          errorMessage = data.detail.map((err) => err.msg || err.message).join(', ');
+        } else {
+          errorMessage = data.detail;
+        }
+      } else if (data.error) {
+        errorMessage = typeof data.error === 'string' ? data.error : JSON.stringify(data.error);
       }
     }
     const error = new Error(errorMessage);
