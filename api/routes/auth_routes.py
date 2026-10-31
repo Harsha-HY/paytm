@@ -92,22 +92,18 @@ def register_initial_admin(req: AdminRegisterRequest, db: Session = Depends(get_
     )
     db.add(admin_profile)
 
-    # Automatically initialize demo wallet and QR
+    # Automatically initialize admin wallet and QR
     db.add(Wallet(user_id=new_user.id, balance=50000.0, currency="INR"))
     token_str = uuid.uuid4().hex[:8].upper()
-    code = f"MDR-PAY-{new_user.id}-{token_str}"
-    payload = json.dumps({
+    admin_qr_code = f"MDR-PAY-{new_user.id}-{token_str}"
+    admin_payload = json.dumps({
         "app": "MDR_SETTLEMENT_GUARDIAN",
-        "qr_code": code,
+        "qr_code": admin_qr_code,
         "user_id": new_user.id,
-        "account_type": new_user.account_type,
+        "account_type": "admin",
         "v": 1
     })
-    db.add(UserQR(user_id=new_user.id, qr_code=code, qr_payload=payload, is_active=True, qr_status="ACTIVE"))
-    if account_type == "merchant":
-        merchant_profile.assigned_qr_id = code
-        merchant_profile.qr_status = "ACTIVE"
-
+    db.add(UserQR(user_id=new_user.id, qr_code=admin_qr_code, qr_payload=admin_payload, is_active=True, qr_status="ACTIVE"))
     db.commit()
     db.refresh(new_user)
 
@@ -192,7 +188,6 @@ def register_user(req: UserRegisterRequest, db: Session = Depends(get_db)):
     if account_type == "merchant":
         merchant_profile.assigned_qr_id = code
         merchant_profile.qr_status = "ACTIVE"
-
     db.commit()
     db.refresh(new_user)
 
