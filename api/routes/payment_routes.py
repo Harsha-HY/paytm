@@ -240,9 +240,27 @@ def simulate_payment(
     random_suffix = uuid.uuid4().hex[:6].upper()
     txn_id = f"TXN_{timestamp_str}_{random_suffix}"
 
-    # Perform atomic balance update
+    # If P2M, run the central database-backed MDR rules engine FIRST to calculate net settlement
+    credited_amount = amount
+    calc = None
+    if is_p2m:
+        category = receiver.merchant_profile.business_category if receiver.merchant_profile else None
+        subcategory = getattr(receiver.merchant_profile, "business_subcategory", None)
+        calc = calculate_mdr(
+            amount=amount,
+            merchant_category=category,
+            merchant_subcategory=subcategory,
+            payment_type="P2M",
+            db=db
+        )
+        # CRUCIAL: The available merchant account balance is credited the NET SETTLEMENT amount (Gross minus MDR & GST)
+        credited_amount = round(calc["net_settlement"], 2)
+
+    # Perform atomic balance update:
+    # Sender is debited the full gross payment
     sender_wallet.balance = round(sender_wallet.balance - amount, 2)
-    receiver_wallet.balance = round(receiver_wallet.balance + amount, 2)
+    # Receiver (merchant) is credited ONLY the net settled amount after MDR and GST deductions
+    receiver_wallet.balance = round(receiver_wallet.balance + credited_amount, 2)
 
     # Create transaction
     new_txn = Transaction(
@@ -259,18 +277,7 @@ def simulate_payment(
     db.add(new_txn)
     db.flush()
 
-    # If P2M, run the central database-backed MDR rules engine
-    if is_p2m:
-        category = receiver.merchant_profile.business_category if receiver.merchant_profile else None
-        subcategory = getattr(receiver.merchant_profile, "business_subcategory", None)
-        calc = calculate_mdr(
-            amount=amount,
-            merchant_category=category,
-            merchant_subcategory=subcategory,
-            payment_type="P2M",
-            db=db
-        )
-
+    if is_p2m and calc:
         settlement = TransactionSettlement(
             transaction_id=new_txn.id,
             gross_amount=calc["gross_amount"],
