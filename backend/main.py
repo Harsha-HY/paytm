@@ -13,7 +13,10 @@ from events import event_manager
 from fastapi import WebSocket, WebSocketDisconnect
 
 # Create database tables automatically
-Base.metadata.create_all(bind=engine)
+try:
+    Base.metadata.create_all(bind=engine)
+except Exception as e:
+    print(f"[Database Warning] Table creation skipped or existing: {e}")
 
 app = FastAPI(
     title="MDR Settlement Guardian API",

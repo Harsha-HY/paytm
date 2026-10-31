@@ -17,14 +17,23 @@ engine = None
 try:
     if DATABASE_URL.startswith("postgresql"):
         print(f"[Database] Connecting to Supabase PostgreSQL...")
-        test_engine = create_engine(
-            DATABASE_URL,
-            connect_args={"connect_timeout": 15},
-            pool_pre_ping=True,
-            pool_recycle=300,
-            pool_size=10,
-            max_overflow=20
-        )
+        is_serverless = bool(os.getenv("VERCEL"))
+        if is_serverless:
+            from sqlalchemy.pool import NullPool
+            test_engine = create_engine(
+                DATABASE_URL,
+                connect_args={"connect_timeout": 15},
+                poolclass=NullPool
+            )
+        else:
+            test_engine = create_engine(
+                DATABASE_URL,
+                connect_args={"connect_timeout": 15},
+                pool_pre_ping=True,
+                pool_recycle=300,
+                pool_size=10,
+                max_overflow=20
+            )
         with test_engine.connect() as conn:
             pass
         engine = test_engine

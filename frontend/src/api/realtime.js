@@ -13,13 +13,16 @@ class RealtimeClient {
       return;
     }
 
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    // Backend runs on port 8000 in dev
-    const host = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
-      ? '127.0.0.1:8000'
-      : window.location.host;
+    let wsUrl = import.meta.env.VITE_WS_URL;
+    if (!wsUrl) {
+      const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+      // Backend runs on port 8000 in dev
+      const host = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'
+        ? '127.0.0.1:8000'
+        : window.location.host;
 
-    const wsUrl = `${protocol}//${host}/ws`;
+      wsUrl = `${protocol}//${host}/ws`;
+    }
 
     try {
       this.ws = new WebSocket(wsUrl);

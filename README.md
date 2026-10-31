@@ -114,6 +114,39 @@ npm run dev -- --host 127.0.0.1 --port 5173
 
 ---
 
+## 🌐 One-Click Vercel Deployment Guide
+
+This repository is pre-configured with `vercel.json`, `api/index.py`, and root `package.json` to deploy both the Vite frontend and the FastAPI backend directly on Vercel without mistakes.
+
+### Step-by-Step Vercel Deployment:
+
+1. **Import Repository**:
+   - Go to [Vercel Dashboard](https://vercel.com/dashboard) and click **"Add New..."** > **"Project"**.
+   - Select and import your GitHub repository: `https://github.com/Harsha-HY/paytm`.
+
+2. **Project Settings**:
+   - **Framework Preset**: Other (automatically detected from `package.json`).
+   - **Root Directory**: `./` (leave default repository root).
+   - **Build Command**: `cd frontend && npm install && npm run build` (configured automatically in `vercel.json`).
+   - **Output Directory**: `frontend/dist` (configured automatically in `vercel.json`).
+
+3. **Configure Environment Variables** (Critical):
+   Under **Environment Variables**, add these two variables:
+   - `DATABASE_URL`:
+     ```text
+     postgresql+psycopg://postgres.jgbsnhnyxykgqttomrol:%40Paytm246%21%40@aws-0-eu-west-1.pooler.supabase.com:5432/postgres
+     ```
+   - `JWT_SECRET`:
+     ```text
+     mdr-settlement-guardian-super-secure-key-2026
+     ```
+
+4. **Click Deploy**:
+   - Vercel will install npm dependencies, compile the React Vite bundle, install Python requirements, and deploy the serverless API routes under `/api/*`.
+   - Your live URL will be ready in under 60 seconds!
+
+---
+
 ## 🔒 Permanent Admin Credentials
 
 - **Email**: `admin@gmail.com`
