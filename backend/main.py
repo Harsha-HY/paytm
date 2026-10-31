@@ -33,6 +33,15 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.middleware("http")
+async def vercel_path_normalizer(request, call_next):
+    path = request.scope.get("path", "")
+    if path in ["", "/"]:
+        request.scope["path"] = "/"
+    elif not path.startswith("/api") and not path.startswith("/docs") and not path.startswith("/openapi.json"):
+        request.scope["path"] = f"/api{path}"
+    return await call_next(request)
+
 # Include routers
 app.include_router(auth_router)
 app.include_router(admin_router)
