@@ -1,5 +1,6 @@
+import os
 import uvicorn
-from fastapi import FastAPI
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from database import engine, Base
 import models # ensure all models are registered
@@ -10,18 +11,20 @@ from routes.payment_routes import router as payment_router
 from routes.rules_routes import router as rules_router
 from routes.explain_routes import router as explain_router
 from events import event_manager
-from fastapi import WebSocket, WebSocketDisconnect
 
-# Create database tables automatically
-try:
-    Base.metadata.create_all(bind=engine)
-except Exception as e:
-    print(f"[Database Warning] Table creation skipped or existing: {e}")
+# Create database tables automatically (skip on serverless cold-start)
+if not os.getenv("VERCEL") and engine is not None:
+    try:
+        Base.metadata.create_all(bind=engine)
+    except Exception as e:
+        print(f"[Database Warning] Table creation skipped or existing: {e}")
 
 app = FastAPI(
     title="MDR Settlement Guardian API",
     description="Backend services for MDR Settlement Guardian - Paytm Merchant Growth AI",
-    version="1.0.0"
+    version="1.0.0",
+    docs_url="/docs",
+    openapi_url="/openapi.json"
 )
 
 # CORS configuration for frontend
@@ -64,6 +67,8 @@ async def websocket_endpoint(websocket: WebSocket):
         event_manager.disconnect(websocket)
 
 @app.get("/")
+@app.get("/api")
+@app.get("/api/")
 def health_check():
     return {
         "status": "healthy",
