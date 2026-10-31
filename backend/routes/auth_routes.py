@@ -104,9 +104,6 @@ def register_initial_admin(req: AdminRegisterRequest, db: Session = Depends(get_
         "v": 1
     })
     db.add(UserQR(user_id=new_user.id, qr_code=code, qr_payload=payload, is_active=True, qr_status="ACTIVE"))
-    if account_type == "merchant":
-        merchant_profile.assigned_qr_id = code
-        merchant_profile.qr_status = "ACTIVE"
 
     db.commit()
     db.refresh(new_user)
