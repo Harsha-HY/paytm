@@ -85,7 +85,7 @@ def health_check():
     return {
         "status": "healthy",
         "service": "MDR Settlement Guardian API",
-        "version": "1.0.0",
+        "version": "v1.0.2-autoheal",
         "stage": "Stage 3 - LLM Explainer, Cognee Memory & Sarvam Voice",
         "database": str(engine.url),
         "db_error": str(db_init_error)
