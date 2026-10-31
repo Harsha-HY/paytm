@@ -1,0 +1,76 @@
+# MDR Settlement Guardian - Regulatory & Fee Rules Configuration
+# IMPORTANT: These are project demonstration assumptions for Paytm Build for India Hackathon.
+# Every rate, cap, threshold, category, and effective date is dynamically editable.
+
+version: "2026.1"
+effective_from: "2026-11-01"
+enabled: true
+disclaimer: "SIMULATED PAYMENT — NO REAL MONEY TRANSFERRED."
+
+# Standard UPI P2M Merchant MDR Bands
+bands:
+  - name: "Free Tier (≤ ₹2,000)"
+    min_amount: 0.0
+    max_amount: 2000.0
+    rate: 0.0
+    flat_cap: null
+    description: "About 95% of P2M transactions by count stay completely free."
+
+  - name: "Standard 0.4% Rate (> ₹2,000 & < ₹75,000)"
+    min_amount: 2000.01
+    max_amount: 74999.99
+    rate: 0.004
+    flat_cap: null
+    description: "Flat 0.4% MDR on transaction value."
+
+  - name: "Capped Tier (₹75,000 and above)"
+    min_amount: 75000.0
+    max_amount: 10000000.0
+    rate: 0.004
+    flat_cap: 300.0
+    description: "0.4% capped at maximum ₹300 per transaction."
+
+# Category-Specific Special Overrides
+special_categories:
+  essential_services:
+    description: "Essential services (rail, telecom, insurance, fuel, utilities)"
+    categories:
+      - "fuel"
+      - "telecom"
+      - "insurance"
+      - "railway"
+      - "utilities"
+      - "electricity"
+      - "water"
+      - "essential services"
+    flat_fee_above_2000: 5.0
+    fee_upto_2000: 0.0
+
+  capital_markets:
+    description: "Capital markets (AMCs, brokers, dealers, securities)"
+    categories:
+      - "capital markets"
+      - "amc"
+      - "broker"
+      - "brokerage"
+      - "securities"
+      - "dealers"
+    rate: 0.0002 # 0.02%
+    flat_cap: 300.0
+
+# Small Merchant QR Receipt Threshold Cliff
+small_merchant:
+  monthly_volume_limit: 100000.0 # ₹1 Lakh
+  consecutive_months_requirement: 3
+  alert_thresholds:
+    - 0.75 # 75%
+    - 0.90 # 90%
+  description: "Small shops pay 0% until QR receipts exceed ₹1 lakh/month for 3 consecutive months."
+
+# Goods & Services Tax (GST) on Merchant Discount Rate
+gst:
+  enabled: true
+  rate: 0.18 # 18% GST on MDR fee
+  tax_treatment: "CGST_SGST" # CGST (9%) + SGST (9%) or IGST (18%)
+  claimable_input_tax_credit: true
+  description: "18% GST applies strictly on the MDR service fee, claimable by merchant as Input Tax Credit."
