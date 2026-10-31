@@ -10,6 +10,24 @@ export default function QRScannerModal({ isOpen, onClose, onTargetResolved }) {
   const [error, setError] = useState('');
   const [cameraPermission, setCameraPermission] = useState('prompt'); // 'prompt' | 'granted' | 'denied'
   const scannerRef = useRef(null);
+  const fileInputRef = useRef(null);
+
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setLoading(true);
+    setError('');
+    try {
+      const html5QrCode = new Html5Qrcode('qr-reader-container');
+      const decodedText = await html5QrCode.scanFile(file, true);
+      await resolveAndProceed(decodedText);
+    } catch (err) {
+      setError('Could not detect a QR code in this photo. Please make sure the QR code is clearly visible and well-lit.');
+    } finally {
+      setLoading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   useEffect(() => {
     if (!isOpen || activeMode !== 'camera') {
@@ -48,7 +66,6 @@ export default function QRScannerModal({ isOpen, onClose, onTargetResolved }) {
       } catch (err) {
         console.warn('Camera start failed or permission denied:', err);
         setCameraPermission('denied');
-        setActiveMode('manual');
       }
     }
 
@@ -172,25 +189,55 @@ export default function QRScannerModal({ isOpen, onClose, onTargetResolved }) {
 
         {/* Camera Viewport */}
         {activeMode === 'camera' && (
-          <div className="relative rounded-2xl overflow-hidden bg-slate-950 flex flex-col items-center justify-center min-h-[260px] border border-slate-800">
-            <div id="qr-reader-container" className="w-full h-full min-h-[260px]" />
+          <div className="space-y-3">
+            <div className="relative rounded-2xl overflow-hidden bg-slate-950 flex flex-col items-center justify-center min-h-[250px] border border-slate-800">
+              <div id="qr-reader-container" className="w-full h-full min-h-[250px]" />
 
-            {/* Futuristic Scanning Overlay Reticle */}
-            <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
-              <div className="w-56 h-56 border-2 border-[#00BAF2] rounded-2xl relative shadow-lg shadow-[#00BAF2]/20">
-                {/* Laser animation */}
-                <div className="absolute left-2 right-2 h-0.5 bg-gradient-to-r from-transparent via-[#00BAF2] to-transparent animate-pulse"
-                     style={{ top: '50%' }} />
-                {/* Corner reticles */}
-                <span className="absolute -top-1 -left-1 w-4 h-4 border-t-3 border-l-3 border-[#00BAF2]" />
-                <span className="absolute -top-1 -right-1 w-4 h-4 border-t-3 border-r-3 border-[#00BAF2]" />
-                <span className="absolute -bottom-1 -left-1 w-4 h-4 border-b-3 border-l-3 border-[#00BAF2]" />
-                <span className="absolute -bottom-1 -right-1 w-4 h-4 border-b-3 border-r-3 border-[#00BAF2]" />
-              </div>
-              <span className="text-[11px] font-bold text-white/90 bg-black/60 px-3 py-1 rounded-full mt-4 backdrop-blur-xs">
-                Align QR Code within frame
-              </span>
+              {cameraPermission === 'granted' && (
+                <div className="absolute inset-0 pointer-events-none flex flex-col items-center justify-center">
+                  <div className="w-52 h-52 border-2 border-[#00BAF2] rounded-2xl relative shadow-lg shadow-[#00BAF2]/20">
+                    <div className="absolute left-2 right-2 h-0.5 bg-gradient-to-r from-transparent via-[#00BAF2] to-transparent animate-pulse"
+                         style={{ top: '50%' }} />
+                    <span className="absolute -top-1 -left-1 w-4 h-4 border-t-3 border-l-3 border-[#00BAF2]" />
+                    <span className="absolute -top-1 -right-1 w-4 h-4 border-t-3 border-r-3 border-[#00BAF2]" />
+                    <span className="absolute -bottom-1 -left-1 w-4 h-4 border-b-3 border-l-3 border-[#00BAF2]" />
+                    <span className="absolute -bottom-1 -right-1 w-4 h-4 border-b-3 border-r-3 border-[#00BAF2]" />
+                  </div>
+                  <span className="text-[10px] font-bold text-white/90 bg-black/60 px-3 py-1 rounded-full mt-3 backdrop-blur-xs">
+                    Align QR Code within frame
+                  </span>
+                </div>
+              )}
+
+              {cameraPermission === 'denied' && (
+                <div className="p-6 text-center text-slate-300 space-y-2">
+                  <Camera className="w-10 h-10 mx-auto text-[#00BAF2] opacity-80" />
+                  <p className="text-xs font-semibold text-white">Live Camera Stream Unavailable</p>
+                  <p className="text-[11px] text-slate-400">
+                    Mobile browsers require HTTPS for live video. Use the button below to snap a photo with your phone camera directly!
+                  </p>
+                </div>
+              )}
             </div>
+
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              capture="environment"
+              className="hidden"
+              onChange={handleFileUpload}
+            />
+
+            <button
+              type="button"
+              onClick={() => fileInputRef.current?.click()}
+              disabled={loading}
+              className="w-full py-2.5 px-3 bg-gradient-to-r from-[#002970] to-[#00BAF2] hover:brightness-110 active:scale-[0.99] text-white font-bold rounded-xl text-xs flex items-center justify-center space-x-2 shadow-md cursor-pointer transition-all disabled:opacity-50"
+            >
+              <Camera className="w-4 h-4" />
+              <span>{loading ? 'Scanning Photo...' : '📷 Snap Photo with Phone Camera / Upload QR'}</span>
+            </button>
           </div>
         )}
 
