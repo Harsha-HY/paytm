@@ -98,10 +98,11 @@ export default function MerchantDashboard() {
     loadWallet();
     loadDailyAnalysis(selectedDate);
 
-    // Subscribe to real-time events for instant updates without page refresh
+    // Instant WebSocket synchronization
     const unsubscribe = realtime.subscribe((event) => {
       if (
         event.type === 'TRANSACTION_CREATED' ||
+        event.type === 'WALLET_TOPPED_UP' ||
         event.type === 'MERCHANT_STATUS_UPDATED' ||
         event.type === 'MERCHANT_CATEGORY_UPDATED' ||
         event.type === 'MDR_RULE_UPDATED' ||
@@ -113,8 +114,25 @@ export default function MerchantDashboard() {
       }
     });
 
+    // Smart polling heartbeat (every 3 seconds for guaranteed live sync)
+    const interval = setInterval(() => {
+      loadWallet();
+      loadDailyAnalysis(selectedDate);
+    }, 3000);
+
+    // Refresh immediately on tab focus or screen unlock
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadWallet();
+        loadDailyAnalysis(selectedDate);
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
       unsubscribe();
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, [selectedDate]);
 

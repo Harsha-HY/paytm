@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { apiRequest } from '../api/client';
+import { realtime } from '../api/realtime';
 import TransactionReceiptModal from '../components/TransactionReceiptModal';
 import {
   ArrowLeft,
@@ -60,7 +61,26 @@ export default function MerchantTransactionHistory() {
     const timer = setTimeout(() => {
       fetchTransactions();
     }, 250);
-    return () => clearTimeout(timer);
+
+    const unsubscribe = realtime.subscribe((event) => {
+      if (
+        event.type === 'TRANSACTION_CREATED' ||
+        event.type === 'WALLET_TOPPED_UP' ||
+        event.type === 'MDR_RULE_UPDATED'
+      ) {
+        fetchTransactions();
+      }
+    });
+
+    const interval = setInterval(() => {
+      fetchTransactions();
+    }, 3000);
+
+    return () => {
+      clearTimeout(timer);
+      unsubscribe();
+      clearInterval(interval);
+    };
   }, [search, directionFilter, statusFilter, dateFilter]);
 
   const clearFilters = () => {

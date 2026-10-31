@@ -259,8 +259,25 @@ export default function AdminDashboard() {
       }
     });
 
+    // Smart polling heartbeat (every 3 seconds for guaranteed live stats and transactions)
+    const interval = setInterval(() => {
+      loadStats();
+      loadTransactions();
+    }, 3000);
+
+    // Refresh immediately on tab focus or screen unlock
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadStats();
+        loadTransactions();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
       unsubscribe();
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, []);
 

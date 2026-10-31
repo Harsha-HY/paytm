@@ -75,6 +75,11 @@ def topup_wallet(
     wallet.balance += req.amount
     db.commit()
     db.refresh(wallet)
+    emit_event_sync("WALLET_TOPPED_UP", {
+        "user_id": current_user.id,
+        "new_balance": wallet.balance,
+        "amount_added": req.amount
+    })
     return WalletResponse(balance=wallet.balance, currency=wallet.currency)
 
 @router.get("/my-qr", response_model=UserQRResponse)

@@ -1,15 +1,20 @@
 import asyncio
 import json
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 from fastapi import WebSocket
 
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
+        self.main_loop: Optional[asyncio.AbstractEventLoop] = None
+
+    def set_loop(self, loop: asyncio.AbstractEventLoop):
+        self.main_loop = loop
 
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
+        self.main_loop = asyncio.get_running_loop()
         # Send initial connected greeting
         try:
             await websocket.send_json({
@@ -40,19 +45,24 @@ class ConnectionManager:
 event_manager = ConnectionManager()
 
 def emit_event_sync(event_type: str, data: Dict[str, Any]):
-    """Synchronous helper that safely schedules async broadcast on running loop."""
+    """Synchronous helper that safely schedules async broadcast from worker threads to main asyncio loop."""
+    payload = {
+        "type": event_type,
+        "data": data
+    }
+
+    loop = event_manager.main_loop
+    if loop and loop.is_running():
+        try:
+            asyncio.run_coroutine_threadsafe(event_manager.broadcast(payload), loop)
+            return
+        except Exception as e:
+            print(f"[Events] Threadsafe broadcast error: {e}")
+
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            asyncio.create_task(event_manager.broadcast({
-                "type": event_type,
-                "data": data
-            }))
-        else:
-            loop.run_until_complete(event_manager.broadcast({
-                "type": event_type,
-                "data": data
-            }))
-    except Exception as e:
-        # If no loop in current thread, ignore safely (WebSocket clients will refresh via fallback)
+        cur_loop = asyncio.get_running_loop()
+        if cur_loop.is_running():
+            cur_loop.create_task(event_manager.broadcast(payload))
+            return
+    except RuntimeError:
         pass

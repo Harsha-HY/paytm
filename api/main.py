@@ -40,6 +40,13 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+@app.on_event("startup")
+async def startup_event():
+    try:
+        event_manager.set_loop(asyncio.get_running_loop())
+    except Exception:
+        pass
+
 @app.exception_handler(Exception)
 async def global_exception_handler(request: Request, exc: Exception):
     err_str = str(exc)

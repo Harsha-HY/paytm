@@ -73,14 +73,33 @@ export default function PersonalDashboard() {
   useEffect(() => {
     loadData();
 
+    // Instant WebSocket synchronization
     const unsubscribe = realtime.subscribe((event) => {
-      if (event.type === 'TRANSACTION_CREATED') {
+      if (
+        event.type === 'TRANSACTION_CREATED' ||
+        event.type === 'WALLET_TOPPED_UP'
+      ) {
         loadData();
       }
     });
 
+    // Smart polling heartbeat (every 3 seconds for guaranteed live sync)
+    const interval = setInterval(() => {
+      loadData();
+    }, 3000);
+
+    // Refresh immediately on tab focus or screen unlock
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') {
+        loadData();
+      }
+    };
+    document.addEventListener('visibilitychange', handleVisibility);
+
     return () => {
       unsubscribe();
+      clearInterval(interval);
+      document.removeEventListener('visibilitychange', handleVisibility);
     };
   }, []);
 
